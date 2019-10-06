@@ -62,7 +62,7 @@ function parseErrorMessage(error: any) {
 	let str = /.*line:?\s*(\d+),\s*column:?\s*(\d+)/i.exec(msg);
 	let line = 0;
 	let column = 0;
-	if (str && str.length === 2) {
+	if (str && str.length === 3) {
 		line = parseInt(str[1]) - 1;
 		column = parseInt(str[2]) - 1;
 	} else {
