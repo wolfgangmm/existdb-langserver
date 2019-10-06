@@ -5,7 +5,7 @@ This repository contains both, a language server and a Visual Studio Code extens
 * linting: shows errors reported by eXistdb and warnings produced by XQLint
 * autocomplete for all functions known in the XQuery context of the current file, including imported modules
 * document symbols (functions only) for outline view
-* hover: incomplete
+* hover: incomplete, just shows local function signatures
 
 The client extension additionally includes XQuery syntax highlighting copied from https://github.com/DotJoshJohnson/vscode-xml.
 
@@ -32,3 +32,5 @@ then package the extension into a `.vsix` file with
 ```
 vsce package
 ```
+
+The package is rather large at the moment. It should be preprocessed with webpack when released (not done yet).
