@@ -11,7 +11,7 @@ The client extension additionally includes XQuery syntax highlighting copied fro
 
 ## Prerequisites
 
-The server side support package for the Atom editor - `atom-editor` needs to be installed on the server.
+The server side support package for the Atom editor - `atom-editor` needs to be installed on the server. The parameters required for the communication with the server can be configured via the extension settings.
 
 ## Run
 
