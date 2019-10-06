@@ -1,0 +1,85 @@
+{
+    "name": "existdb-vscode",
+    "version": "1.0.0",
+    "description": "Language server and client for eXist and XQuery",
+    "scripts": {
+        "vscode:prepublish": "cd client && npm run update-vscode && cd .. && npm run compile",
+        "compile": "tsc -b",
+        "watch": "tsc -b -w",
+        "postinstall": "cd client && npm install && cd ../server && npm install && cd .."
+    },
+    "keywords": [
+        "languageserver"
+    ],
+    "author": "Wolfgang Meier",
+    "publisher": "existdb",
+    "license": "GPL-3.0-or-later",
+    "engines": {
+        "vscode": "^1.33.0"
+    },
+    "activationEvents": [
+        "onLanguage:xquery"
+    ],
+    "main": "./client/out/extension",
+    "contributes": {
+        "grammars": [
+            {
+                "language": "xquery",
+                "path": "./client/languages/xquery/xquery.tmLanguage",
+                "scopeName": "source.xquery"
+            }
+        ],
+        "languages": [
+            {
+                "id": "xquery",
+                "aliases": [
+                    "XQuery",
+                    "xquery"
+                ],
+                "extensions": [
+                    ".xq",
+                    ".xql",
+                    ".xqm",
+                    ".xqy",
+                    ".xquery"
+                ],
+                "configuration": "./client/languages/xquery/xquery.json"
+            }
+        ],
+        "configuration": {
+            "type": "object",
+            "title": "eXistdb Server configuration",
+            "properties": {
+                "existdb.uri": {
+                    "scope": "resource",
+                    "type": "string",
+                    "default": "http://localhost:8080/exist",
+                    "description": "The base URL eXist is running on"
+                },
+                "existdb.user": {
+                    "scope": "resource",
+                    "type": "string",
+                    "default": "admin",
+                    "description": "Name of the user to connect with"
+                },
+                "existdb.password": {
+                    "scope": "resource",
+                    "type": "string",
+                    "default": "",
+                    "description": "Password for the user to connect with"
+                },
+                "existdb.path": {
+                    "scope": "resource",
+                    "type": "string",
+                    "default": null,
+                    "description": "Path to the app collection within eXist"
+                }
+            }
+        }
+    },
+    "devDependencies": {
+        "@types/node": "^8.0.0",
+        "tslint": "^5.16.0",
+        "typescript": "^3.5.1"
+    }
+}

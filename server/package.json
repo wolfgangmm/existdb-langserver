@@ -1,0 +1,24 @@
+{
+  "name": "existdb-langserver",
+  "version": "1.0.0",
+  "description": "Language server for eXistdb/XQuery",
+  "main": "index.js",
+  "scripts": {},
+  "keywords": [
+    "lsp",
+    "langserver",
+    "xquery"
+  ],
+  "author": "Wolfgang Meier",
+  "license": "GPL-3.0-or-later",
+  "engines": {
+    "node": "*"
+  },
+  "dependencies": {
+    "@types/request": "^2.48.3",
+    "request": "^2.88.0",
+    "vscode-languageserver": "^5.2.1",
+    "vscode-uri": "^2.0.3",
+    "xqlint": "github:eXistSolutions/xqlint#exist-syntax"
+  }
+}

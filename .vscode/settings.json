@@ -1,0 +1,11 @@
+{
+	"editor.insertSpaces": false,
+	"tslint.enable": true,
+	"typescript.tsc.autoDetect": "off",
+	"typescript.preferences.quoteStyle": "single",
+	"workbench.colorCustomizations": {
+		"activityBar.background": "#0E1095",
+		"titleBar.activeBackground": "#1417D1",
+		"titleBar.activeForeground": "#FCFCFF"
+	}
+}
