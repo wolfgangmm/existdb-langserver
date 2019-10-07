@@ -178,6 +178,8 @@ export class AnalyzedDocument {
 				let args: string[] = [];
 				if (argsStr.indexOf(',') > -1) {
 					args = argsStr.split(/\s*,\s*/);
+				} else if (argsStr !== '') {
+					args = [argsStr];
 				}
 				const arity = args.length;
 				const signature = name + "(" + args + ")";
