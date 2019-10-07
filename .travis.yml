@@ -5,3 +5,19 @@ node_js:
   - 8
   - 10
   - 12
+
+services:
+  - docker
+  - xvfb 
+ 
+before_install:
+  # get exist instance running with atom lib installed  
+  - docker build -t exist-vs test/.
+  - docker run -dit -p 8080:8080 exist-vs
+  - sleep 25
+  # No idea why we need to do this
+  - export DISPLAY=':99.0'
+  - service xvfb start
+  - sleep 3
+
+  
