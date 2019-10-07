@@ -3,7 +3,7 @@ import { ServerSettings } from './settings';
 import { AST } from './ast';
 import * as request from 'request';
 
-const funcDefRe = /\(:~.*declare.+function.+:\)|(declare\s+((?:%[\w\:\-]+(?:\([^\)]*\))?\s*)*)function\s+([^\(]+)\()/g;
+const funcDefRe = /(?:\(:~(.*?):\))?\s*declare\s+((?:%[\w\:\-]+(?:\([^\)]*\))?\s*)*function\s+([^\(]+)\()/gsm;
 const trimRe = /^[\x09\x0a\x0b\x0c\x0d\x20\xa0\u1680\u180e\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000]+|[\x09\x0a\x0b\x0c\x0d\x20\xa0\u1680\u180e\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000]+$/g;
 const paramRe = /\$[^\s]+/;
 const importRe = /(import\s+module\s+namespace\s+[^=]+\s*=\s*["'][^"']+["']\s*(?:at\s+["'][^"']+["'])?\s*;)/g;
@@ -168,16 +168,20 @@ export class AnalyzedDocument {
 		this.localSymbols = [];
 		let funcDef = funcDefRe.exec(text);
 		while (funcDef) {
-			if (funcDef[1]) {
+			if (funcDef[2]) {
 				const offset = funcDefRe.lastIndex;
 				const end = this.findMatchingParen(text, offset);
 
-				const name = ((funcDef.length == 4) ? funcDef[3] : funcDef[2]).replace(trimRe, "");
-				let status = funcDef.length == 4 ? funcDef[2] : "public";
-				const args = text.substring(offset, end).split(/\s*,\s*/);
+				const documentation = funcDef[1];
+				const name = funcDef[3].replace(trimRe, "");
+				const argsStr = text.substring(offset, end);
+				let args: string[] = [];
+				if (argsStr.indexOf(',') > -1) {
+					args = argsStr.split(/\s*,\s*/);
+				}
 				const arity = args.length;
 				const signature = name + "(" + args + ")";
-				status = status.indexOf("%private") == -1 ? "private" : 'public';
+				// const status = funcDef[2].indexOf("%private") == -1 ? "private" : 'public';
 
 				const symbol: Symbol = {
 					signature: signature,
@@ -189,6 +193,9 @@ export class AnalyzedDocument {
 						end: end
 					}
 				};
+				if (documentation) {
+					symbol.documentation = documentation;
+				}
 				this.localSymbols.push(symbol);
 				this.symbolsMap.set(symbol.name, symbol);
 			}
