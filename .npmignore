@@ -1,0 +1,6 @@
+test/
+.travis.yml
+.vscode/
+*.vsix
+.gitignore
+package-lock.json
