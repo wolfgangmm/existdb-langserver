@@ -12,6 +12,10 @@
         "languageserver"
     ],
     "author": "Wolfgang Meier",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/wolfgangmm/existdb-langserver.git"
+      },
     "publisher": "existdb",
     "license": "GPL-3.0-or-later",
     "engines": {
