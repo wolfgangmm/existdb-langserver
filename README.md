@@ -1,5 +1,7 @@
 # Language Server and Client for XQuery/eXistdb
 
+[![Build Status](https://travis-ci.com/wolfgangmm/existdb-langserver.svg?branch=master)](https://travis-ci.com/wolfgangmm/existdb-langserver)
+
 This repository contains both, a language server and a Visual Studio Code extension for developing XQuery code targeted at eXistdb. The language server currently supports the following capabilities for XQuery:
 
 * linting: shows errors reported by eXistdb and warnings produced by XQLint
