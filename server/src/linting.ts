@@ -10,6 +10,7 @@ import { AnalyzedDocument } from './analyzed-document';
 import * as request from 'request';
 
 export function lintDocument(text: string, relPath: string, document: AnalyzedDocument, settings: ServerSettings): Promise<AnalyzedDocument | ResponseError<any>> {
+	document.diagnostics = [];
 	xqlint(document.uri, text, document);
 	return serverLint(text, settings, relPath, document);
 }
