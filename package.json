@@ -6,12 +6,17 @@
         "vscode:prepublish": "cd client && npm run update-vscode && cd .. && npm run compile",
         "compile": "tsc -b",
         "watch": "tsc -b -w",
+        "test": "npm run compile && mocha",
         "postinstall": "cd client && npm install && cd ../server && npm install && cd .."
     },
     "keywords": [
         "languageserver"
     ],
     "author": "Wolfgang Meier",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/wolfgangmm/existdb-langserver.git"
+    },
     "publisher": "existdb",
     "license": "GPL-3.0-or-later",
     "engines": {
@@ -78,7 +83,11 @@
         }
     },
     "devDependencies": {
+        "@types/mocha": "^5.2.7",
         "@types/node": "^8.0.0",
+        "assert": "^2.0.0",
+        "mocha": "^6.2.1",
+        "ts-node": "^8.4.1",
         "tslint": "^5.16.0",
         "typescript": "^3.5.1"
     }
