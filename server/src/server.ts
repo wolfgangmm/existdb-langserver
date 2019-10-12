@@ -4,18 +4,23 @@
  * @author Wolfgang Meier
  */
 import {
-	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind,
-	TextDocument, DidChangeConfigurationNotification, TextDocumentPositionParams, CompletionItem, CompletionItemKind, NotificationType, WorkspaceFolder, ResponseError, DocumentSymbolParams, SymbolInformation, Hover
+	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, Position,
+	TextDocument, DidChangeConfigurationNotification, TextDocumentPositionParams, CompletionItem,
+	WorkspaceFolder, ResponseError, DocumentSymbolParams,
+	SymbolInformation, Hover,
+	Location
 } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
 import { lintDocument } from './linting';
 import { ServerSettings } from './settings';
 import { AnalyzedDocument } from './analyzed-document';
+// import { Sync } from './sync';
 
 const defaultSettings: ServerSettings = {
 	uri: 'http://localhost:8080/exist/apps/atom-editor',
 	user: 'admin',
-	password: ''
+	password: '',
+	path: ''
 };
 let globalSettings: ServerSettings = defaultSettings;
 
@@ -36,13 +41,38 @@ let workspaceFolder: WorkspaceFolder;
 let hasConfigurationCapability: boolean = false;
 let hasWorkspaceFolderCapability: boolean = false;
 
+// let sync = new Sync(connection.console);
+
 function getAnalyzedDocument(textDocument: TextDocument) {
 	let document = analyzedDocuments.get(textDocument.uri);
 	if (!document) {
-		document = new AnalyzedDocument(textDocument.uri, textDocument.getText());
+		document = new AnalyzedDocument(textDocument.uri, textDocument.getText(), log);
 		analyzedDocuments.set(textDocument.uri, document);
 	}
 	return document;
+}
+
+function getRelativePath(uri: string) {
+	let relPath = '/db';
+	if (workspaceFolder) {
+		relPath = uri.substr(workspaceFolder.uri.length + 1);
+		relPath = relPath.replace(/^(.*?)\/[^\/]+$/, '$1');
+	}
+	return relPath;
+}
+
+function log(message: string, prio: string = 'log') {
+	switch (prio) {
+		case 'warn':
+			connection.console.warn(`[Server ${workspaceFolder.name}] ${message}`);
+			break;
+		case 'info':
+			connection.console.info(`[Server ${workspaceFolder.name}] ${message}`);
+			break;
+		default:
+			connection.console.log(`[Server ${workspaceFolder.name}] ${message}`);
+			break;
+	}
 }
 
 connection.onDidChangeConfiguration(change => {
@@ -111,6 +141,7 @@ connection.onInitialize((params) => {
 				resolveProvider: true
 			},
 			documentSymbolProvider: true,
+			definitionProvider: true,
 			hoverProvider: true
 		}
 	};
@@ -144,7 +175,7 @@ async function lint(textDocument: TextDocument) {
 	const text = textDocument.getText();
 	let document = analyzedDocuments.get(uri);
 	if (!document) {
-		document = new AnalyzedDocument(uri, text);
+		document = new AnalyzedDocument(uri, text, log);
 		analyzedDocuments.set(uri, document);
 	} else {
 		document.analyze(text);
@@ -153,11 +184,7 @@ async function lint(textDocument: TextDocument) {
 	if (!settings.path) {
 		settings.path = `/db/apps/${workspaceFolder.name}`;
 	}
-	let relPath = '/db';
-	if (workspaceFolder) {
-		relPath = uri.substr(workspaceFolder.uri.length + 1);
-		relPath = relPath.replace(/^(.*?)\/[^\/]+$/, '$1');
-	}
+	const relPath = getRelativePath(uri);
 	const resp = await lintDocument(text, relPath, document, settings);
 	if (resp instanceof ResponseError) {
 		connection.console.log(`[Server ${workspaceFolder.name}] ${resp}`);
@@ -178,7 +205,7 @@ async function autocomplete(position: TextDocumentPositionParams): Promise<Compl
 	const text = textDocument.getText();
 	let document = analyzedDocuments.get(uri);
 	if (!document) {
-		document = new AnalyzedDocument(uri, text);
+		document = new AnalyzedDocument(uri, text, log);
 		analyzedDocuments.set(uri, document);
 	}
 	const settings = await getDocumentSettings(uri);
@@ -197,11 +224,7 @@ async function autocomplete(position: TextDocumentPositionParams): Promise<Compl
 		}
 	}
 	const prefix = text.substring(start, offset);
-	let relPath = '/db';
-	if (workspaceFolder) {
-		relPath = uri.substr(workspaceFolder.uri.length + 1);
-		relPath = relPath.replace(/^(.*?)\/[^\/]+$/, '$1');
-	}
+	const relPath = getRelativePath(uri);
 	const resp = await document.getCompletions(prefix, relPath, settings);
 	if (resp instanceof ResponseError) {
 		connection.console.log(`[Server ${workspaceFolder.name}] ${resp}`);
@@ -226,16 +249,51 @@ connection.onDocumentSymbol((params: DocumentSymbolParams): SymbolInformation[] 
 	return document.getDocumentSymbols(textDocument);
 });
 
-connection.onHover((params: TextDocumentPositionParams): Hover | null => {
-	const uri = params.textDocument.uri;
+connection.onHover((params: TextDocumentPositionParams): Promise<Hover | null> => {
+	return hover(params.textDocument.uri, params.position);
+});
+
+async function hover(uri: string, position: Position) {
 	const textDocument = documents.get(uri);
 	if (!textDocument) {
 		return null;
 	}
 	const document = getAnalyzedDocument(textDocument);
-	return document.getHover(params.position);
+	const relPath = getRelativePath(uri);
+	const settings = await getDocumentSettings(uri);
+	return document.getHover(position, relPath, settings);
+}
+
+connection.onDefinition((params: TextDocumentPositionParams): Promise<Location | null> => {
+	return gotoDefinition(params.textDocument.uri, params.position);
 });
 
+async function gotoDefinition(uri: string, position: Position) {
+	const textDocument = documents.get(uri);
+	if (!textDocument) {
+		return null;
+	}
+	const document = getAnalyzedDocument(textDocument);
+	const relPath = getRelativePath(uri);
+	const settings = await getDocumentSettings(uri);
+	return document.gotoDefinition(position, relPath, textDocument, settings);
+}
+
+// connection.onDidChangeWatchedFiles((params: DidChangeWatchedFilesParams): void => {
+// 	for (let change of params.changes) {
+// 		let relPath = '/db';
+// 		if (workspaceFolder) {
+// 			relPath = change.uri.substr(workspaceFolder.uri.length + 1);
+// 			relPath = relPath.replace(/^(.*?)\/[^\/]+$/, '$1');
+// 		}
+// 		getDocumentSettings(change.uri).then(settings => {
+// 			sync.process(settings, change.type, change.uri, relPath);
+// 		});
+// 	}
+// });
+
 documents.listen(connection);
+
+// connection.sendNotification('window/showMessage', { type: MessageType.Info, message: 'Hello' });
 
 connection.listen();

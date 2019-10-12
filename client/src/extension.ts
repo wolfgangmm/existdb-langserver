@@ -46,7 +46,7 @@ function getOuterMostWorkspaceFolder(folder: WorkspaceFolder): WorkspaceFolder {
 export function activate(context: ExtensionContext) {
 
 	let module = context.asAbsolutePath(path.join('server', 'out', 'server.js'));
-	let outputChannel: OutputChannel = Window.createOutputChannel('existdb-langserver');
+	let outputChannel: OutputChannel = Window.createOutputChannel('eXistdb Language Server');
 
 	function didOpenTextDocument(document: TextDocument): void {
 		// We are only interested in language mode text
@@ -60,7 +60,7 @@ export function activate(context: ExtensionContext) {
 			let debugOptions = { execArgv: ["--nolazy", "--inspect=6010"] };
 			let serverOptions = {
 				run: { module, transport: TransportKind.ipc },
-				debug: { module, transport: TransportKind.ipc, options: debugOptions}
+				debug: { module, transport: TransportKind.ipc, options: debugOptions }
 			};
 			let clientOptions: LanguageClientOptions = {
 				documentSelector: [
@@ -86,7 +86,7 @@ export function activate(context: ExtensionContext) {
 			let debugOptions = { execArgv: ["--nolazy", `--inspect=${6011 + clients.size}`] };
 			let serverOptions = {
 				run: { module, transport: TransportKind.ipc },
-				debug: { module, transport: TransportKind.ipc, options: debugOptions}
+				debug: { module, transport: TransportKind.ipc, options: debugOptions }
 			};
 			let clientOptions: LanguageClientOptions = {
 				documentSelector: [
@@ -94,7 +94,10 @@ export function activate(context: ExtensionContext) {
 				],
 				diagnosticCollectionName: 'existdb',
 				workspaceFolder: folder,
-				outputChannel: outputChannel
+				outputChannel: outputChannel,
+				// synchronize: {
+				// 	fileEvents: Workspace.createFileSystemWatcher(`${folder.uri.fsPath}/**/*`)
+				// }
 			};
 			let client = new LanguageClient('existdb-langserver', 'eXist Language Server', serverOptions, clientOptions);
 			client.start();
@@ -105,7 +108,7 @@ export function activate(context: ExtensionContext) {
 	Workspace.onDidOpenTextDocument(didOpenTextDocument);
 	Workspace.textDocuments.forEach(didOpenTextDocument);
 	Workspace.onDidChangeWorkspaceFolders((event) => {
-		for (let folder  of event.removed) {
+		for (let folder of event.removed) {
 			let client = clients.get(folder.uri.toString());
 			if (client) {
 				clients.delete(folder.uri.toString());

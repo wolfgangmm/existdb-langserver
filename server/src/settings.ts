@@ -15,5 +15,5 @@ export interface ServerSettings {
 	 * usually '/db/apps/my-app'. This is required for linting and other 
 	 * capabilities to resolve imports etc.
 	 */
-	path?: string;
+	path: string;
 }
