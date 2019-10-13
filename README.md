@@ -7,7 +7,8 @@ This repository contains both, a language server and a Visual Studio Code extens
 * linting: shows errors reported by eXistdb and warnings produced by XQLint
 * autocomplete for all functions known in the XQuery context of the current file, including imported modules
 * document symbols (functions only) for outline view
-* hover: incomplete, just shows local function signatures
+* hover: shows signatures and description for local and imported functions
+* goto definition: navigate to definition of function in local or imported module (as long as it is in the same workspace)
 
 The client extension additionally includes XQuery syntax highlighting copied from https://github.com/DotJoshJohnson/vscode-xml.
 
