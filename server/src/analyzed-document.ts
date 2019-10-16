@@ -25,6 +25,11 @@ interface Symbol {
 	name: string;
 	snippet: string;
 	documentation?: string;
+	arguments?: [{
+		name: string,
+		type: string,
+		description?: string
+	}];
 	location?: {
 		start: number;
 		end: number;
@@ -101,14 +106,14 @@ export class AnalyzedDocument {
 						const rp = path.relative(`${settings.path}/${relPath}`, desc.path);
 						const fp = URI.parse(this.uri).fsPath;
 						const absPath = path.resolve(path.dirname(fp), rp);
+						console.log(`reading ${absPath}`);
 						fs.readFile(absPath, { encoding: 'UTF-8' }, (err, content) => {
 							if (error || !content) {
-								this.logger(`failed to parse ${absPath}`);
+								this.logger(`failed to parse ${absPath}`, 'error');
 								resolve(null);
 								return;
 							}
-							const symbols = AnalyzedDocument.getLocalSymbols(content, true);
-							const symbol = symbols.get(`${signature.name}#${signature.arity}`);
+							const symbol = AnalyzedDocument.getLocalSymbol(content, signature.name, signature.arity);
 							if (symbol && symbol.location) {
 								resolve({
 									uri: URI.file(absPath).toString(),
@@ -171,6 +176,11 @@ export class AnalyzedDocument {
 						const md = [`**${desc.text}** as **${desc.leftLabel}**`];
 						if (desc.description) {
 							md.push(desc.description);
+						}
+						if (desc.arguments && desc.arguments.length > 0) {
+							desc.arguments.forEach((arg: any) => {
+								md.push(`**\$${arg.name}** *${arg.type}* ${arg.description}`);
+							});
 						}
 						resolve({
 							contents: {
@@ -334,6 +344,48 @@ export class AnalyzedDocument {
 			funcDef = funcDefRe.exec(text);
 		}
 		return map;
+	}
+
+	private static getLocalSymbol(text: string, name: string, arity: number): Symbol | null {
+		const re = new RegExp(`(?:\\(:~(.*?):\\))?\\s*declare\\s+((?:%[\\w\\:\\-]+(?:\\([^\\)]*\\))?\\s*)*function\\s+${name}\\()`, 'gsm');
+		let funcDef = funcDefRe.exec(text);
+		while (funcDef) {
+			if (funcDef[2]) {
+				const offset = funcDefRe.lastIndex;
+				const end = AnalyzedDocument.findMatchingParen(text, offset);
+
+				const documentation = funcDef[1];
+				const fname = funcDef[3].replace(trimRe, "");
+				const argsStr = text.substring(offset, end);
+				let args: string[] = [];
+				if (argsStr.indexOf(',') > -1) {
+					args = argsStr.split(/\s*,\s*/);
+				} else if (argsStr !== '') {
+					args = [argsStr];
+				}
+				const arity = args.length;
+				if (args.length === arity && fname === name) {
+					const line = AnalyzedDocument.getLine(text, offset);
+					const location = {
+						start: line,
+						end: line
+					};
+					const symbol: Symbol = {
+						signature: name + "(" + args + ")",
+						type: 'function',
+						name: `${name}#${arity}`,
+						snippet: AnalyzedDocument.getSnippet(name, args),
+						location: location
+					};
+					if (documentation) {
+						symbol.documentation = documentation;
+					}
+					return symbol;
+				}
+			}
+			funcDef = funcDefRe.exec(text);
+		}
+		return null;
 	}
 
 	private static findMatchingParen(text: string, offset: number) {
