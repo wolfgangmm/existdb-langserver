@@ -14,7 +14,8 @@ import { URI } from 'vscode-uri';
 import { lintDocument } from './linting';
 import { ServerSettings } from './settings';
 import { AnalyzedDocument } from './analyzed-document';
-// import { Sync } from './sync';
+import * as path from 'path';
+import * as fs from 'fs';
 
 const defaultSettings: ServerSettings = {
 	uri: 'http://localhost:8080/exist/apps/atom-editor',
@@ -36,12 +37,11 @@ let analyzedDocuments: Map<string, AnalyzedDocument> = new Map();
 
 // The workspace folder this server is operating on
 let workspaceFolder: WorkspaceFolder;
+let workspaceConfig: ServerSettings | null = null;
 
 // capabilities of the client
 let hasConfigurationCapability: boolean = false;
 let hasWorkspaceFolderCapability: boolean = false;
-
-// let sync = new Sync(connection.console);
 
 function getAnalyzedDocument(textDocument: TextDocument) {
 	let document = analyzedDocuments.get(textDocument.uri);
@@ -95,26 +95,63 @@ documents.onDidClose(e => {
 	analyzedDocuments.delete(e.document.uri);
 });
 
+function readWorkspaceConfig(workspaceFolder: WorkspaceFolder): ServerSettings | null {
+	const uri = URI.parse(workspaceFolder.uri);
+	const config = path.join(uri.fsPath, '.existdb.json');
+	if (!fs.existsSync(config)) {
+		return null;
+	}
+	const configData = fs.readFileSync(config, 'utf8');
+	const json = JSON.parse(configData);
+	const sync = json.sync;
+	if (!sync) {
+		return null;
+	}
+
+	const serverDef = sync.server;
+	if (!serverDef) {
+		return null;
+	}
+	const server = json.servers[serverDef];
+	if (!server) {
+		return null;
+	}
+	const user = sync.user || server.user;
+	const password = sync.password || server.password;
+	const settings: ServerSettings = {
+		uri: server.server,
+		user: user,
+		password: password,
+		path: sync.root
+	};
+	return settings;
+}
+
 function getDocumentSettings(resource: string): Thenable<ServerSettings> {
-	if (!hasConfigurationCapability) {
-		return Promise.resolve(globalSettings);
+	if (workspaceConfig) {
+		return Promise.resolve(workspaceConfig);
 	}
-	let result = documentSettings.get(resource);
-	if (!result) {
-		result = connection.workspace.getConfiguration({
-			scopeUri: resource,
-			section: 'existdb'
-		});
-		documentSettings.set(resource, result);
-	}
-	return result;
+	const editorSettings = connection.workspace.getConfiguration({
+		scopeUri: workspaceFolder.uri,
+		section: 'existdb'
+	});
+	return Promise.resolve(editorSettings);
 }
 
 connection.onInitialize((params) => {
+	const workspaceUri = params.initializationOptions.workspaceFolder;
 	if (Array.isArray(params.workspaceFolders) && params.workspaceFolders.length > 0) {
-		workspaceFolder = params.workspaceFolders[0];
+		for (let folder of params.workspaceFolders) {
+			if (folder.uri === workspaceUri) {
+				workspaceFolder = folder;
+				workspaceConfig = readWorkspaceConfig(folder);
+			}
+		}
 	} else if (params.rootUri) {
 		workspaceFolder = { name: '', uri: URI.file(params.rootUri).toString() };
+		if (params.rootUri === workspaceUri) {
+			workspaceConfig = readWorkspaceConfig(workspaceFolder);
+		}
 	}
 	let capabilities = params.capabilities;
 
@@ -127,9 +164,7 @@ connection.onInitialize((params) => {
 		capabilities.workspace && !!capabilities.workspace.workspaceFolders
 	);
 
-	connection.console.log(`[Server ${workspaceFolder.name}] Started and initialize received`);
-
-	// readWorkspaceConfig();
+	connection.console.log(`[${workspaceFolder.name}] Started and initialize received`);
 
 	return {
 		capabilities: {
@@ -147,7 +182,7 @@ connection.onInitialize((params) => {
 	};
 });
 
-connection.onInitialized(() => {
+connection.onInitialized(async () => {
 	if (hasConfigurationCapability) {
 		// Register for all configuration changes.
 		connection.client.register(DidChangeConfigurationNotification.type, undefined);
@@ -278,19 +313,6 @@ async function gotoDefinition(uri: string, position: Position) {
 	const settings = await getDocumentSettings(uri);
 	return document.gotoDefinition(position, relPath, textDocument, settings);
 }
-
-// connection.onDidChangeWatchedFiles((params: DidChangeWatchedFilesParams): void => {
-// 	for (let change of params.changes) {
-// 		let relPath = '/db';
-// 		if (workspaceFolder) {
-// 			relPath = change.uri.substr(workspaceFolder.uri.length + 1);
-// 			relPath = relPath.replace(/^(.*?)\/[^\/]+$/, '$1');
-// 		}
-// 		getDocumentSettings(change.uri).then(settings => {
-// 			sync.process(settings, change.type, change.uri, relPath);
-// 		});
-// 	}
-// });
 
 documents.listen(connection);
 
