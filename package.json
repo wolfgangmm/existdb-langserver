@@ -7,7 +7,8 @@
         "compile": "tsc -b",
         "watch": "tsc -b -w",
         "test": "npm run compile && mocha",
-        "postinstall": "cd client && npm install && cd ../server && npm install && cd .."
+        "postinstall": "cd client && npm install && cd ../server && npm install && cd ../sync && npm install && cd ..",
+        "webpack": "cd server && webpack --mode production --config ./webpack.config.js"
     },
     "keywords": [
         "languageserver"
@@ -23,6 +24,7 @@
         "vscode": "^1.33.0"
     },
     "activationEvents": [
+        "workspaceContains:**/expath-pkg.xml",
         "onLanguage:xquery"
     ],
     "main": "./client/out/extension",
@@ -80,7 +82,36 @@
                     "description": "Path to the app collection within eXist"
                 }
             }
-        }
+        },
+        "taskDefinitions": [
+            {
+                "type": "sync",
+                "properties": {
+                    "server": {
+                        "type": "string",
+                        "description": "Address of the server to sync to"
+                    },
+                    "user": {
+                        "type": "string",
+                        "description": "User to authenticate with"
+                    },
+                    "password": {
+                        "type": "string",
+                        "description": "Password to authenticate with"
+                    },
+                    "root": {
+                        "type": "string",
+                        "description": "Root collection of the app to sync with"
+                    },
+                    "dir": {
+                        "type": "string"
+                    },
+                    "ignore": {
+                        "type": "array"
+                    }
+                }
+            }
+        ]
     },
     "devDependencies": {
         "@types/mocha": "^5.2.7",
@@ -89,6 +120,9 @@
         "mocha": "^6.2.1",
         "ts-node": "^8.4.1",
         "tslint": "^5.16.0",
-        "typescript": "^3.5.1"
+        "typescript": "^3.5.1",
+        "ts-loader": "^6.2.0",
+        "webpack": "^4.41.0",
+        "webpack-cli": "^3.3.9"
     }
 }

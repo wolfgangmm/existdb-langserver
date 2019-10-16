@@ -20,5 +20,8 @@
     "vscode-languageserver": "^5.2.1",
     "vscode-uri": "^2.0.3",
     "xqlint": "github:eXistSolutions/xqlint#exist-syntax"
+  },
+  "devDependencies": {
+    "request-debug": "^0.2.0"
   }
 }

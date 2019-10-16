@@ -1,6 +1,8 @@
+import { ExistTaskProvider } from './task-provider';
 import * as path from 'path';
 import {
-	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel, WorkspaceFolder, Uri
+	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel,
+	WorkspaceFolder, Uri, Disposable, tasks
 } from 'vscode';
 
 import {
@@ -42,9 +44,13 @@ function getOuterMostWorkspaceFolder(folder: WorkspaceFolder): WorkspaceFolder {
 	}
 	return folder;
 }
+let workspaceFolder;
+let taskProvider: Disposable | undefined;
+let syncScript;
 
 export function activate(context: ExtensionContext) {
 
+	let syncScript = context.asAbsolutePath(path.join('sync', 'out', 'sync.js'));
 	let module = context.asAbsolutePath(path.join('server', 'out', 'server.js'));
 	let outputChannel: OutputChannel = Window.createOutputChannel('eXistdb Language Server');
 
@@ -95,15 +101,17 @@ export function activate(context: ExtensionContext) {
 				diagnosticCollectionName: 'existdb',
 				workspaceFolder: folder,
 				outputChannel: outputChannel,
-				// synchronize: {
-				// 	fileEvents: Workspace.createFileSystemWatcher(`${folder.uri.fsPath}/**/*`)
-				// }
+				initializationOptions: {
+					workspaceFolder: folder.uri.toString()
+				}
 			};
 			let client = new LanguageClient('existdb-langserver', 'eXist Language Server', serverOptions, clientOptions);
 			client.start();
 			clients.set(folder.uri.toString(), client);
 		}
 	}
+
+	initTasks(syncScript);
 
 	Workspace.onDidOpenTextDocument(didOpenTextDocument);
 	Workspace.textDocuments.forEach(didOpenTextDocument);
@@ -118,7 +126,18 @@ export function activate(context: ExtensionContext) {
 	});
 }
 
+function initTasks(syncScript: string) {
+	let workspaceFolders = Workspace.workspaceFolders;
+	if (!Array.isArray(workspaceFolders) || workspaceFolders.length == 0) {
+		return;
+	}
+	taskProvider = tasks.registerTaskProvider('existdb-sync', new ExistTaskProvider(workspaceFolders, syncScript));
+}
+
 export function deactivate(): Thenable<void> {
+	if (taskProvider) {
+		taskProvider.dispose();
+	}
 	let promises: Thenable<void>[] = [];
 	if (defaultClient) {
 		promises.push(defaultClient.stop());

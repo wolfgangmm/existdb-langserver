@@ -1,0 +1,23 @@
+{
+  "name": "existdb-sync",
+  "version": "1.0.0",
+  "description": "File watcher to automatically keep a directory in sync with the corresponding collection in eXist-db",
+  "main": "sync.js",
+  "scripts": {},
+  "author": "Wolfgang Meier",
+  "license": "GPL-3.0-or-later",
+  "devDependencies": {
+    "@types/node": "^12.7.12",
+    "@types/request": "^2.48.3",
+    "@types/yargs": "^13.0.3",
+    "tslint": "^5.20.0",
+    "typescript": "^3.6.4"
+  },
+  "dependencies": {
+    "chalk": "^2.4.2",
+    "chokidar": "^3.2.1",
+    "mime": "^2.4.4",
+    "request": "^2.88.0",
+    "yargs": "^14.2.0"
+  }
+}
