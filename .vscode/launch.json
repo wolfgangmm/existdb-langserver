@@ -7,10 +7,14 @@
 			"request": "launch",
 			"name": "Launch Client",
 			"runtimeExecutable": "${execPath}",
-			"args": ["--extensionDevelopmentPath=${workspaceRoot}" ],
+			"args": [
+				"--extensionDevelopmentPath=${workspaceRoot}"
+			],
 			"stopOnEntry": false,
 			"sourceMaps": true,
-			"outFiles": ["${workspaceRoot}/client/out/**/*.js"],
+			"outFiles": [
+				"${workspaceRoot}/client/dist/**/*.js"
+			],
 			"preLaunchTask": "npm: watch"
 		},
 		{
@@ -19,13 +23,15 @@
 			"request": "launch",
 			"runtimeExecutable": "${execPath}",
 			"args": [
-			  "--extensionDevelopmentPath=${workspaceRoot}",
-			  "--extensionTestsPath=${workspaceRoot}/client/out/test",
-			  "${workspaceRoot}/client/testFixture"
+				"--extensionDevelopmentPath=${workspaceRoot}",
+				"--extensionTestsPath=${workspaceRoot}/client/dist/test",
+				"${workspaceRoot}/client/testFixture"
 			],
 			"stopOnEntry": false,
 			"sourceMaps": true,
-			"outFiles": ["${workspaceRoot}/client/out/test/**/*.js"]
+			"outFiles": [
+				"${workspaceRoot}/client/dist/test/**/*.js"
+			]
 		},
 		{
 			"type": "node",
@@ -35,7 +41,9 @@
 			"protocol": "inspector",
 			"port": 6011,
 			"sourceMaps": true,
-			"outFiles": ["${workspaceRoot}/server/out/**/*.js"]
+			"outFiles": [
+				"${workspaceRoot}/server/dist/**/*.js"
+			]
 		},
 		{
 			"type": "node",
@@ -45,7 +53,9 @@
 			"protocol": "inspector",
 			"port": 6012,
 			"sourceMaps": true,
-			"outFiles": ["${workspaceRoot}/server/out/**/*.js"]
+			"outFiles": [
+				"${workspaceRoot}/server/dist/**/*.js"
+			]
 		}
 	]
 }

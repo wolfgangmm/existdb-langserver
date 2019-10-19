@@ -107,7 +107,7 @@ const argv = yargs.options({
 	u: { alias: 'user', type: 'string', default: 'admin' },
 	p: { alias: 'password', type: 'string', default: '' },
 	c: { alias: 'collection', type: 'string', demandOption: true },
-	i: { alias: 'ignore', type: 'string', array: true }
+	i: { alias: 'ignore', type: 'string', array: true, default: [] }
 }).argv;
 
 if (argv._.length == 0) {
@@ -134,6 +134,9 @@ const watcher = chokidar.watch(dir, {
 	ignored: ignored,
 	ignoreInitial: true
 });
+if (watcher.options.useFsEvents) {
+	console.log(chalk`{dim Using fs events.}`);
+}
 watcher.on('change', file => {
 	store(argv, file, path.relative(dir, file));
 });

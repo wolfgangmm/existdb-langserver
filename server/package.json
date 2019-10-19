@@ -2,8 +2,12 @@
   "name": "existdb-langserver",
   "version": "1.0.0",
   "description": "Language server for eXistdb/XQuery",
-  "main": "index.js",
-  "scripts": {},
+  "main": "dist/server.js",
+  "scripts": {
+    "clean": "rimraf ./out ./dist",
+    "webpack": "webpack --mode production --config ./webpack.config.js",
+    "webpack-dev": "webpack --mode development --config ./webpack.config.js"
+  },
   "keywords": [
     "lsp",
     "langserver",

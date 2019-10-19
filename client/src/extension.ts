@@ -9,6 +9,8 @@ import {
 	LanguageClient, LanguageClientOptions, TransportKind
 } from 'vscode-languageclient';
 
+const BINARIES_DIR = 'dist';
+
 let defaultClient: LanguageClient;
 let clients: Map<string, LanguageClient> = new Map();
 
@@ -49,9 +51,8 @@ let taskProvider: Disposable | undefined;
 let syncScript;
 
 export function activate(context: ExtensionContext) {
-
-	let syncScript = context.asAbsolutePath(path.join('sync', 'out', 'sync.js'));
-	let module = context.asAbsolutePath(path.join('server', 'out', 'server.js'));
+	let syncScript = context.asAbsolutePath(path.join('sync', BINARIES_DIR, 'sync.js'));
+	let module = context.asAbsolutePath(path.join('server', BINARIES_DIR, 'server.js'));
 	let outputChannel: OutputChannel = Window.createOutputChannel('eXistdb Language Server');
 
 	function didOpenTextDocument(document: TextDocument): void {

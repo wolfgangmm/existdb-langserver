@@ -2,10 +2,13 @@
     "name": "existdb-vscode-client",
     "version": "1.0.0",
     "description": "Visual Studio Code client for eXistdb/XQuery",
-    "main": "index.js",
+    "main": "dist/extension.js",
     "scripts": {
         "update-vscode": "vscode-install",
-        "postinstall": "vscode-install"
+        "postinstall": "vscode-install",
+        "clean": "rimraf ./out ./dist",
+        "webpack": "webpack --mode production --config ./webpack.config.js",
+        "webpack-dev": "webpack --mode development --config ./webpack.config.js"
     },
     "keywords": [
         "xquery",

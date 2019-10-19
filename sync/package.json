@@ -2,11 +2,16 @@
   "name": "existdb-sync",
   "version": "1.0.0",
   "description": "File watcher to automatically keep a directory in sync with the corresponding collection in eXist-db",
-  "main": "sync.js",
-  "scripts": {},
+  "main": "dist/sync.js",
+  "scripts": {
+    "clean": "rimraf ./out ./dist",
+    "webpack-dev": "webpack --mode development --config ./webpack.config.js",
+    "webpack": "webpack --mode production --config ./webpack.config.js"
+  },
   "author": "Wolfgang Meier",
   "license": "GPL-3.0-or-later",
   "devDependencies": {
+    "@types/chokidar": "^2.1.3",
     "@types/node": "^12.7.12",
     "@types/request": "^2.48.3",
     "@types/yargs": "^13.0.3",
