@@ -12,9 +12,16 @@ This repository contains both, a language server and a Visual Studio Code extens
 
 The client extension additionally includes XQuery syntax highlighting copied from https://github.com/DotJoshJohnson/vscode-xml.
 
+## Syncing Directories to the Server
+
+The extension includes a task provider, which automatically registers a sync task for a workspace if a `.existdb.json` configuration is found and defines sync settings (the [readme for the Atom plugin](https://github.com/eXist-db/atom-existdb), which uses the same config format). The task must be started manually though:
+
+1. select `Terminal` / `Run Task` from the Visual Studio Code menu
+2. find a task named `existdb-sync-name-of-your-workspace` and select it
+
 ## Prerequisites
 
-The server side support package for the Atom editor - `atom-editor` needs to be installed on the server. The parameters required for the communication with the server can be configured via the extension settings.
+The [server side support package](https://github.com/eXist-db/atom-editor-support) for the Atom editor - `atom-editor` needs to be installed on the server. The parameters required for the communication with the server can either be configured via the extension settings, or via a `.existdb.json` file in the root directory of a workspace. The configuration syntax of this file is the same as for the [Atom plugin](https://github.com/eXist-db/atom-existdb).
 
 ## Run
 
@@ -35,5 +42,3 @@ then package the extension into a `.vsix` file with
 ```
 vsce package
 ```
-
-The package is rather large at the moment. It should be preprocessed with webpack when released (not done yet).
