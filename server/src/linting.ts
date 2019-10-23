@@ -94,5 +94,6 @@ function xqlint(uri: String, text: String, document: AnalyzedDocument): Diagnost
 		};
 		diagnostics.push(diagnostic);
 	});
+	document.diagnostics = diagnostics;
 	return diagnostics;
 }
