@@ -33,7 +33,7 @@ function serverLint(text: String, settings: ServerSettings, relPath: string, doc
 		};
 		request(options, (error, response, body) => {
 			if (error || response.statusCode !== 200) {
-				resolve(new ResponseError(ErrorCodes.RequestCancelled, error));
+				resolve(document);
 			} else {
 				const json = JSON.parse(body);
 				if (json.result !== 'pass') {

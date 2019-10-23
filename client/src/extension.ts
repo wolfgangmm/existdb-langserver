@@ -1,3 +1,8 @@
+/**
+ * XQuery/eXistdb extension for Visual Studio Code
+ * 
+ * @author Wolfgang Meier
+ */
 import { ExistTaskProvider } from './task-provider';
 import * as path from 'path';
 import {
@@ -62,8 +67,9 @@ export function activate(context: ExtensionContext) {
 		}
 
 		let uri = document.uri;
+		let folder = Workspace.getWorkspaceFolder(uri);
 		// Untitled files go to a default client.
-		if (uri.scheme === 'untitled' && !defaultClient) {
+		if ((!folder || uri.scheme === 'untitled') && !defaultClient) {
 			let debugOptions = { execArgv: ["--nolazy", "--inspect=6010"] };
 			let serverOptions = {
 				run: { module, transport: TransportKind.ipc },
@@ -71,7 +77,8 @@ export function activate(context: ExtensionContext) {
 			};
 			let clientOptions: LanguageClientOptions = {
 				documentSelector: [
-					{ scheme: 'untitled', language: 'xquery' }
+					{ scheme: 'untitled', language: 'xquery' },
+					{ scheme: 'file', language: 'xquery' }
 				],
 				diagnosticCollectionName: 'existdb',
 				outputChannel: outputChannel
@@ -80,12 +87,7 @@ export function activate(context: ExtensionContext) {
 			defaultClient.start();
 			return;
 		}
-		let folder = Workspace.getWorkspaceFolder(uri);
-		// Files outside a folder can't be handled. This might depend on the language.
-		// Single file languages like JSON might handle files outside the workspace folders.
-		if (!folder) {
-			return;
-		}
+		
 		// If we have nested workspace folders we only start a server on the outer most workspace folder.
 		folder = getOuterMostWorkspaceFolder(folder);
 

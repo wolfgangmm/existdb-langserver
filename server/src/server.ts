@@ -8,7 +8,7 @@ import {
 	TextDocument, DidChangeConfigurationNotification, TextDocumentPositionParams, CompletionItem,
 	WorkspaceFolder, ResponseError, DocumentSymbolParams,
 	SymbolInformation, Hover,
-	Location
+	Location, InitializeResult
 } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
 import { lintDocument } from './linting';
@@ -37,6 +37,7 @@ let analyzedDocuments: Map<string, AnalyzedDocument> = new Map();
 
 // The workspace folder this server is operating on
 let workspaceFolder: WorkspaceFolder;
+let workspaceName: string = 'no workspace';
 let workspaceConfig: ServerSettings | null = null;
 
 // capabilities of the client
@@ -64,13 +65,13 @@ function getRelativePath(uri: string) {
 function log(message: string, prio: string = 'log') {
 	switch (prio) {
 		case 'warn':
-			connection.console.warn(`[Server ${workspaceFolder.name}] ${message}`);
+			connection.console.warn(`[${workspaceName}] ${message}`);
 			break;
 		case 'info':
-			connection.console.info(`[Server ${workspaceFolder.name}] ${message}`);
+			connection.console.info(`[${workspaceName}] ${message}`);
 			break;
 		default:
-			connection.console.log(`[Server ${workspaceFolder.name}] ${message}`);
+			connection.console.log(`[${workspaceName}] ${message}`);
 			break;
 	}
 }
@@ -131,26 +132,35 @@ function getDocumentSettings(resource: string): Thenable<ServerSettings> {
 	if (workspaceConfig) {
 		return Promise.resolve(workspaceConfig);
 	}
-	const editorSettings = connection.workspace.getConfiguration({
-		scopeUri: workspaceFolder.uri,
-		section: 'existdb'
-	});
-	return Promise.resolve(editorSettings);
+	if (workspaceFolder) {
+		const editorSettings = connection.workspace.getConfiguration({
+			scopeUri: workspaceFolder.uri,
+			section: 'existdb'
+		});
+		if (editorSettings) {
+			return Promise.resolve(editorSettings);
+		}
+	}
+	return Promise.resolve(defaultSettings);
 }
 
 connection.onInitialize((params) => {
-	const workspaceUri = params.initializationOptions.workspaceFolder;
-	if (Array.isArray(params.workspaceFolders) && params.workspaceFolders.length > 0) {
-		for (let folder of params.workspaceFolders) {
-			if (folder.uri === workspaceUri) {
-				workspaceFolder = folder;
-				workspaceConfig = readWorkspaceConfig(folder);
+	const workspaceUri = params.initializationOptions ? params.initializationOptions.workspaceFolder : null;
+	if (workspaceUri) {
+		if (Array.isArray(params.workspaceFolders) && params.workspaceFolders.length > 0) {
+			for (let folder of params.workspaceFolders) {
+				if (folder.uri === workspaceUri) {
+					workspaceFolder = folder;
+					workspaceName = workspaceFolder.name;
+					workspaceConfig = readWorkspaceConfig(folder);
+				}
 			}
-		}
-	} else if (params.rootUri) {
-		workspaceFolder = { name: '', uri: URI.file(params.rootUri).toString() };
-		if (params.rootUri === workspaceUri) {
-			workspaceConfig = readWorkspaceConfig(workspaceFolder);
+		} else if (params.rootUri) {
+			workspaceFolder = { name: 'unnamed', uri: URI.file(params.rootUri).toString() };
+			if (params.rootUri === workspaceUri) {
+				workspaceConfig = readWorkspaceConfig(workspaceFolder);
+				workspaceName = workspaceFolder.name;
+			}
 		}
 	}
 	let capabilities = params.capabilities;
@@ -164,7 +174,7 @@ connection.onInitialize((params) => {
 		capabilities.workspace && !!capabilities.workspace.workspaceFolders
 	);
 
-	connection.console.log(`[${workspaceFolder.name}] Started and initialize received`);
+	connection.console.log(`[${workspaceName}] Started and initialized`);
 
 	return {
 		capabilities: {
@@ -187,7 +197,7 @@ connection.onInitialized(async () => {
 		// Register for all configuration changes.
 		connection.client.register(DidChangeConfigurationNotification.type, undefined);
 	}
-	if (hasWorkspaceFolderCapability) {
+	if (hasWorkspaceFolderCapability && workspaceFolder) {
 		connection.workspace.onDidChangeWorkspaceFolders(_event => {
 			connection.console.log('Workspace folder change event received.');
 		});
@@ -195,13 +205,13 @@ connection.onInitialized(async () => {
 });
 
 documents.onDidOpen((event) => {
-	connection.console.log(`[${workspaceFolder.name}] Document opened: ${event.document.uri}`);
+	connection.console.log(`[${workspaceName}] Document opened: ${event.document.uri}`);
 });
 
 // The content of a text document has changed. This event is emitted
 // when the text document first opened or when its content has changed.
 documents.onDidChangeContent(async change => {
-	connection.console.log(`[${workspaceFolder.name}] changed: ${change.document.uri}`);
+	connection.console.log(`[${workspaceName}] changed: ${change.document.uri}`);
 	lint(change.document);
 });
 
@@ -217,14 +227,10 @@ async function lint(textDocument: TextDocument) {
 	}
 	const settings = await getDocumentSettings(uri);
 	if (!settings.path) {
-		settings.path = `/db/apps/${workspaceFolder.name}`;
+		settings.path = workspaceFolder ? `/db/apps/${workspaceName}` : '/db';
 	}
 	const relPath = getRelativePath(uri);
 	const resp = await lintDocument(text, relPath, document, settings);
-	if (resp instanceof ResponseError) {
-		connection.console.log(`[Server ${workspaceFolder.name}] ${resp}`);
-		return null;
-	}
 	// Send the computed diagnostics to VSCode.
 	connection.sendDiagnostics({ uri: uri, diagnostics: document.diagnostics });
 }
@@ -262,7 +268,7 @@ async function autocomplete(position: TextDocumentPositionParams): Promise<Compl
 	const relPath = getRelativePath(uri);
 	const resp = await document.getCompletions(prefix, relPath, settings);
 	if (resp instanceof ResponseError) {
-		connection.console.log(`[Server ${workspaceFolder.name}] ${resp}`);
+		connection.console.log(`[Server ${workspaceName}] ${resp}`);
 	} else {
 		return resp;
 	}
