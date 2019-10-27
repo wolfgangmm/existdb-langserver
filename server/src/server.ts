@@ -8,22 +8,20 @@ import {
 	TextDocument, DidChangeConfigurationNotification, TextDocumentPositionParams, CompletionItem,
 	WorkspaceFolder, ResponseError, DocumentSymbolParams,
 	SymbolInformation, Hover,
-	Location, InitializeResult
+	Location, ConfigurationItem
 } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
-import { lintDocument } from './linting';
 import { ServerSettings } from './settings';
 import { AnalyzedDocument } from './analyzed-document';
-import * as path from 'path';
-import * as fs from 'fs';
+import { checkServer, installXar, readWorkspaceConfig } from './utils';
+import { lintDocument } from './linting';
 
 const defaultSettings: ServerSettings = {
-	uri: 'http://localhost:8080/exist/apps/atom-editor',
+	uri: 'http://localhost:8080/exist',
 	user: 'admin',
 	password: '',
 	path: ''
 };
-let globalSettings: ServerSettings = defaultSettings;
 
 // Cache the settings of all open documents
 let documentSettings: Map<string, Thenable<ServerSettings>> = new Map();
@@ -39,6 +37,7 @@ let analyzedDocuments: Map<string, AnalyzedDocument> = new Map();
 let workspaceFolder: WorkspaceFolder;
 let workspaceName: string = 'no workspace';
 let workspaceConfig: ServerSettings | null = null;
+let resourcesDir: string;
 
 // capabilities of the client
 let hasConfigurationCapability: boolean = false;
@@ -47,7 +46,7 @@ let hasWorkspaceFolderCapability: boolean = false;
 function getAnalyzedDocument(textDocument: TextDocument) {
 	let document = analyzedDocuments.get(textDocument.uri);
 	if (!document) {
-		document = new AnalyzedDocument(textDocument.uri, textDocument.getText(), log);
+		document = new AnalyzedDocument(textDocument.uri, textDocument.getText(), log, reportStatus);
 		analyzedDocuments.set(textDocument.uri, document);
 	}
 	return document;
@@ -76,14 +75,11 @@ function log(message: string, prio: string = 'log') {
 	}
 }
 
-connection.onDidChangeConfiguration(change => {
+connection.onDidChangeConfiguration(() => {
 	if (hasConfigurationCapability) {
 		// Reset all cached document settings
 		documentSettings.clear();
 	} else {
-		globalSettings = <ServerSettings>(
-			(change.settings.languageServerExample || defaultSettings)
-		);
 	}
 
 	// Revalidate all open text documents
@@ -96,50 +92,19 @@ documents.onDidClose(e => {
 	analyzedDocuments.delete(e.document.uri);
 });
 
-function readWorkspaceConfig(workspaceFolder: WorkspaceFolder): ServerSettings | null {
-	const uri = URI.parse(workspaceFolder.uri);
-	const config = path.join(uri.fsPath, '.existdb.json');
-	if (!fs.existsSync(config)) {
-		return null;
-	}
-	const configData = fs.readFileSync(config, 'utf8');
-	const json = JSON.parse(configData);
-	const sync = json.sync;
-	if (!sync) {
-		return null;
-	}
-
-	const serverDef = sync.server;
-	if (!serverDef) {
-		return null;
-	}
-	const server = json.servers[serverDef];
-	if (!server) {
-		return null;
-	}
-	const user = sync.user || server.user;
-	const password = sync.password || server.password;
-	const settings: ServerSettings = {
-		uri: server.server,
-		user: user,
-		password: password,
-		path: sync.root
-	};
-	return settings;
-}
-
-function getDocumentSettings(resource: string): Thenable<ServerSettings> {
+function getSettings(): Thenable<ServerSettings> {
 	if (workspaceConfig) {
 		return Promise.resolve(workspaceConfig);
 	}
+	const configItem: ConfigurationItem = {
+		section: 'existdb'
+	};
 	if (workspaceFolder) {
-		const editorSettings = connection.workspace.getConfiguration({
-			scopeUri: workspaceFolder.uri,
-			section: 'existdb'
-		});
-		if (editorSettings) {
-			return Promise.resolve(editorSettings);
-		}
+		configItem.scopeUri = workspaceFolder.uri;
+	}
+	const editorSettings = connection.workspace.getConfiguration(configItem);
+	if (editorSettings) {
+		return Promise.resolve(editorSettings);
 	}
 	return Promise.resolve(defaultSettings);
 }
@@ -163,6 +128,8 @@ connection.onInitialize((params) => {
 			}
 		}
 	}
+	resourcesDir = params.initializationOptions.resources;
+
 	let capabilities = params.capabilities;
 
 	// Does the client support the `workspace/configuration` request?
@@ -187,9 +154,56 @@ connection.onInitialize((params) => {
 			},
 			documentSymbolProvider: true,
 			definitionProvider: true,
-			hoverProvider: true
+			hoverProvider: true,
+			executeCommandProvider: {
+				commands: ['reconnect']
+			}
 		}
 	};
+});
+
+async function checkServerConnection() {
+	if (resourcesDir) {
+		const settings = await getSettings();
+		log(`Checking connection to ${settings.uri}`);
+		reportStatus('Connecting ...', settings);
+		checkServer(settings, resourcesDir).then(response => {
+			if (response) {
+				connection.sendNotification('existdb/install', [response.message, response.xar]);
+			}
+			reportStatus('Connected', settings);
+		}).catch((message) => {
+			connection.window.showWarningMessage(message);
+			connection.sendNotification('existdb/status', ['$(database) Disonnected', settings.uri]);
+		});
+	}
+}
+
+async function reportStatus(online: boolean | string, settings: ServerSettings | undefined) {
+	if (!settings) {
+		settings = await getSettings();
+	}
+	let message;
+	if (typeof online === 'string') {
+		message = online;
+	} else {
+		message = online ? 'Connected' : 'Disconnected';
+	}
+	connection.sendNotification('existdb/status', [`$(database) ${message}`, settings.uri]);
+}
+
+connection.onNotification('existdb/install', async (xar) => {
+	const settings = await getSettings();
+	log(`Installing server-side XAR on ${settings.uri}`);
+	installXar(settings, xar).then((success) => {
+		if (!success) {
+			connection.window.showWarningMessage('Installing server-side helper failed!');
+		} else {
+			connection.window.showInformationMessage('Server-side helper installed.');
+		}
+	}).catch((error) => {
+		connection.console.log(`Connecting to server failed: ${error}`);
+	});
 });
 
 connection.onInitialized(async () => {
@@ -202,6 +216,8 @@ connection.onInitialized(async () => {
 			connection.console.log('Workspace folder change event received.');
 		});
 	}
+
+	checkServerConnection();
 });
 
 documents.onDidOpen((event) => {
@@ -215,17 +231,23 @@ documents.onDidChangeContent(async change => {
 	lint(change.document);
 });
 
+connection.onExecuteCommand(params => {
+	if (params.command === 'reconnect') {
+		return checkServerConnection();
+	}
+});
+
 async function lint(textDocument: TextDocument) {
 	const uri = textDocument.uri;
 	const text = textDocument.getText();
 	let document = analyzedDocuments.get(uri);
 	if (!document) {
-		document = new AnalyzedDocument(uri, text, log);
+		document = new AnalyzedDocument(uri, text, log, reportStatus);
 		analyzedDocuments.set(uri, document);
 	} else {
 		document.analyze(text);
 	}
-	const settings = await getDocumentSettings(uri);
+	const settings = await getSettings();
 	if (!settings.path) {
 		settings.path = workspaceFolder ? `/db/apps/${workspaceName}` : '/db';
 	}
@@ -246,10 +268,10 @@ async function autocomplete(position: TextDocumentPositionParams): Promise<Compl
 	const text = textDocument.getText();
 	let document = analyzedDocuments.get(uri);
 	if (!document) {
-		document = new AnalyzedDocument(uri, text, log);
+		document = new AnalyzedDocument(uri, text, log, reportStatus);
 		analyzedDocuments.set(uri, document);
 	}
-	const settings = await getDocumentSettings(uri);
+	const settings = await getSettings();
 	const offset = textDocument.offsetAt(position.position);
 	let start = offset;
 	for (let i = offset - 1; i > 0; i--) {
@@ -268,7 +290,7 @@ async function autocomplete(position: TextDocumentPositionParams): Promise<Compl
 	const relPath = getRelativePath(uri);
 	const resp = await document.getCompletions(prefix, relPath, settings);
 	if (resp instanceof ResponseError) {
-		connection.console.log(`[Server ${workspaceName}] ${resp}`);
+		connection.console.log(`[${workspaceName}] ${resp}`);
 	} else {
 		return resp;
 	}
@@ -301,7 +323,7 @@ async function hover(uri: string, position: Position) {
 	}
 	const document = getAnalyzedDocument(textDocument);
 	const relPath = getRelativePath(uri);
-	const settings = await getDocumentSettings(uri);
+	const settings = await getSettings();
 	return document.getHover(position, relPath, settings);
 }
 
@@ -316,7 +338,7 @@ async function gotoDefinition(uri: string, position: Position) {
 	}
 	const document = getAnalyzedDocument(textDocument);
 	const relPath = getRelativePath(uri);
-	const settings = await getDocumentSettings(uri);
+	const settings = await getSettings();
 	return document.gotoDefinition(position, relPath, textDocument, settings);
 }
 

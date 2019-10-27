@@ -6,6 +6,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { URI } from 'vscode-uri';
 
+// require('request-debug')(request);
+
 const funcDefRe = /(?:\(:~(.*?):\))?\s*declare\s+((?:%[\w\:\-]+(?:\([^\)]*\))?\s*)*function\s+([^\(]+)\()/gsm;
 const trimRe = /^[\x09\x0a\x0b\x0c\x0d\x20\xa0\u1680\u180e\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000]+|[\x09\x0a\x0b\x0c\x0d\x20\xa0\u1680\u180e\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000]+$/g;
 const paramRe = /\$[^\s]+/;
@@ -57,9 +59,13 @@ export class AnalyzedDocument {
 
 	logger: (message: string, prio?: string) => void;
 
-	constructor(uri: string, text: string | null = null, logger: (message: string, prio?: string) => void) {
+	status: (message: boolean | string, settings?: ServerSettings) => void;
+
+	constructor(uri: string, text: string | null = null, logger: (message: string, prio?: string) => void,
+		status: (message: boolean | string, settings?: ServerSettings) => void) {
 		this.uri = uri;
 		this.logger = logger;
+		this.status = status;
 		if (text) {
 			this.analyze(text);
 		}
@@ -96,12 +102,14 @@ export class AnalyzedDocument {
 		return new Promise(resolve => {
 			request(this.getOptions(params, settings), (error, response, body) => {
 				if (error || response.statusCode !== 200) {
+					this.status(false, settings);
 					resolve(null);
 				} else {
 					const json = JSON.parse(body);
 					if (json.length == 0) {
 						this.logger(`no description found for ${params.signature}`, 'info');
 					} else {
+						this.status(true, settings);
 						const desc = json[0];
 						const rp = path.relative(`${settings.path}/${relPath}`, desc.path);
 						const fp = URI.parse(this.uri).fsPath;
@@ -166,8 +174,10 @@ export class AnalyzedDocument {
 		return new Promise(resolve => {
 			request(this.getOptions(params, settings), (error, response, body) => {
 				if (error || response.statusCode !== 200) {
+					this.status(false, settings);
 					resolve(null);
 				} else {
+					this.status(true, settings);
 					const json = JSON.parse(body);
 					if (json.length == 0) {
 						this.logger(`hover: no description found for ${params.signature}`, 'info');
@@ -221,8 +231,10 @@ export class AnalyzedDocument {
 		return new Promise(resolve => {
 			request(this.getOptions(params, settings), (error, response, body) => {
 				if (error || response.statusCode !== 200) {
+					this.status(false, settings);
 					resolve(new ResponseError(ErrorCodes.RequestCancelled, error));
 				} else {
+					this.status(true, settings);
 					const json = JSON.parse(body);
 					const symbols: any[] = [];
 					json.forEach((item: { text: string; snippet: string; type: string; name: string; description: string; }) => {

@@ -33,8 +33,10 @@ function serverLint(text: String, settings: ServerSettings, relPath: string, doc
 		};
 		request(options, (error, response, body) => {
 			if (error || response.statusCode !== 200) {
+				document.status(false, settings);
 				resolve(document);
 			} else {
+				document.status(true, settings);
 				const json = JSON.parse(body);
 				if (json.result !== 'pass') {
 					const error = parseErrorMessage(json.error);

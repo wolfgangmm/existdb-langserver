@@ -31,6 +31,21 @@
     ],
     "main": "./client/dist/extension",
     "contributes": {
+        "commands": [
+            {
+                "command": "existdb.reconnect",
+                "title": "eXist-db: Reconnect to Servers"
+            }
+        ],
+        "menus": {
+            "editor/title": [
+                {
+                    "when": "editorLangId == xquery",
+                    "command": "existdb.reconnect",
+                    "group": "2_existdb"
+                }
+            ]
+        },
         "grammars": [
             {
                 "language": "xquery",
