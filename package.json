@@ -12,8 +12,11 @@
         "webpack-dev": "cd server && npm run webpack-dev && cd ../client && npm run webpack-dev && cd ../sync && npm run webpack-dev",
         "clean": "cd server && npm run clean && cd ../client && npm run clean && cd ../sync && npm run clean"
     },
+    "icon": "resources/icon.png", 
     "keywords": [
-        "languageserver"
+        "xquery",
+        "existdb",
+        "xmldb"
     ],
     "author": "Wolfgang Meier",
     "repository": {
@@ -26,7 +29,7 @@
         "vscode": "^1.33.0"
     },
     "activationEvents": [
-        "workspaceContains:**/expath-pkg.xml",
+        "workspaceContains:expath-pkg.xml",
         "onLanguage:xquery"
     ],
     "main": "./client/dist/extension",
@@ -51,6 +54,12 @@
                 "language": "xquery",
                 "path": "./client/languages/xquery/xquery.tmLanguage",
                 "scopeName": "source.xquery"
+            }
+        ],
+        "snippets": [
+            {
+                "language": "xquery",
+                "path": "./client/snippets/xquery.json"
             }
         ],
         "languages": [
