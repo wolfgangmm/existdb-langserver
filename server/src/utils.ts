@@ -96,7 +96,6 @@ export async function installXar(settings: ServerSettings | null, xar: any): Pro
 	if (!settings) {
 		return true;
 	}
-	console.log('Streaming %s', xar.path);
 	const fileName = path.basename(xar.path);
 	const targetPath = `/db/system/repo/${fileName}`;
 	const url = `${settings.uri}/rest${targetPath}`;
@@ -192,7 +191,7 @@ function query(workspaceConfig: ServerSettings | null, query: string): Promise<a
 			options,
 			function (error, response, body) {
 				if (error || !(response.statusCode == 200 || response.statusCode == 201)) {
-					reject(response.statusCode);
+					reject(error);
 				} else {
 					resolve(body);
 				}
