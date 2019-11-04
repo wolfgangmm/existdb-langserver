@@ -328,6 +328,12 @@
 		</dict>
 		<dict>
 			<key>match</key>
+			<string>=&gt;</string>
+			<key>name</key>
+			<string>keyword.control.flow.xquery</string>
+		</dict>
+		<dict>
+			<key>match</key>
 			<string>(?&lt;![:\-_a-zA-Z0-9])(\+|-|&lt;=?|&gt;=?|eq|ne|lt|le|ge|gt|\*|div|idiv|mod)(?![:\-_a-zA-Z0-9])</string>
 			<key>name</key>
 			<string>keyword.operator.arithmetic.xquery</string>
