@@ -12,7 +12,7 @@
         "webpack-dev": "cd server && npm run webpack-dev && cd ../client && npm run webpack-dev && cd ../sync && npm run webpack-dev",
         "clean": "cd server && npm run clean && cd ../client && npm run clean && cd ../sync && npm run clean"
     },
-    "icon": "resources/icon.png", 
+    "icon": "resources/icon.png",
     "keywords": [
         "xquery",
         "existdb",
@@ -37,7 +37,13 @@
         "commands": [
             {
                 "command": "existdb.reconnect",
-                "title": "eXist-db: Reconnect to Servers"
+                "title": "Reconnect to Servers",
+                "category": "eXist-db"
+            },
+            {
+                "command": "existdb.execute",
+                "title": "Execute current XQuery on the server",
+                "category": "eXist-db"
             }
         ],
         "menus": {
@@ -46,9 +52,22 @@
                     "when": "editorLangId == xquery",
                     "command": "existdb.reconnect",
                     "group": "2_existdb"
+                },
+                {
+                    "when": "editorLangId == xquery",
+                    "command": "existdb.execute",
+                    "group": "2_existdb"
                 }
             ]
         },
+        "keybindings": [
+            {
+                "command": "existdb.execute",
+                "when": "editorLangId == xquery",
+                "key": "ctrl-alt-enter",
+                "mac": "cmd-alt-enter"
+            }
+        ],
         "grammars": [
             {
                 "language": "xquery",

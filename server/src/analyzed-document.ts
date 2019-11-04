@@ -258,9 +258,43 @@ export class AnalyzedDocument {
 		return this.mapDocumentSymbols(this.localSymbols, textDocument);
 	}
 
-	private getOptions(params: any, settings: ServerSettings) {
+	executeQuery(query: string, settings: ServerSettings, relPath: string): Promise<any> {
+		const params = {
+			output: this.getOutputMode(query),
+			qu: query,
+			count: 100,
+			base: `${settings.path}/${relPath}`
+		};
+		this.logger(`Execute query with output mode: ${params.output}, path: ${params.base}`);
+		return new Promise((resolve, reject) => {
+			request(this.getOptions(params, settings, 'execute'), (error, response, body) => {
+				if (!response) {
+					reject(error);
+				}
+				const resultCount = response.headers['x-result-count'];
+				const queryTime = response.headers['x-elapsed'];
+				const queryResponse = {
+					output: params.output,
+					hits: resultCount,
+					elapsed: queryTime,
+					results: body
+				};
+				resolve(queryResponse);
+			});
+		});
+	}
+
+	private getOutputMode(content: string) {
+		const match = /declare\s+option.*:method\s+"(.*)"\s*;/.exec(content);
+		if (match) {
+			return match[1];
+		}
+		return 'adaptive';
+	}
+
+	private getOptions(params: any, settings: ServerSettings, target: string = 'atom-autocomplete.xql') {
 		return {
-			uri: `${settings.uri}/apps/atom-editor/atom-autocomplete.xql`,
+			uri: `${settings.uri}/apps/atom-editor/${target}`,
 			method: "GET",
 			qs: params,
 			useQuerystring: true,

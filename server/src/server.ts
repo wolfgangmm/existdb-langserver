@@ -154,10 +154,7 @@ connection.onInitialize((params) => {
 			},
 			documentSymbolProvider: true,
 			definitionProvider: true,
-			hoverProvider: true,
-			executeCommandProvider: {
-				commands: ['reconnect']
-			}
+			hoverProvider: true
 		}
 	};
 });
@@ -232,10 +229,28 @@ documents.onDidChangeContent(async change => {
 });
 
 connection.onExecuteCommand(params => {
-	if (params.command === 'reconnect') {
-		return checkServerConnection();
+	switch (params.command) {
+		case 'reconnect':
+			return checkServerConnection();
+		case 'execute':
+			return executeQuery(params.arguments);
 	}
 });
+
+async function executeQuery(args: any[] | undefined): Promise<any> {
+	if (args) {
+		const [uri, text] = args;
+		const settings = await getSettings();
+		let document = analyzedDocuments.get(uri);
+		if (!document) {
+			document = new AnalyzedDocument(uri, text, log, reportStatus);
+			analyzedDocuments.set(uri, document);
+		}
+		const relPath = getRelativePath(uri.toString());
+		return document.executeQuery(text, settings, relPath);
+	}
+	return [];
+}
 
 async function lint(textDocument: TextDocument) {
 	const uri = textDocument.uri;

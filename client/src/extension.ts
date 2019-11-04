@@ -7,7 +7,7 @@ import { ExistTaskProvider } from './task-provider';
 import * as path from 'path';
 import {
 	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel,
-	WorkspaceFolder, Uri, Disposable, tasks, commands, StatusBarAlignment
+	WorkspaceFolder, Uri, Disposable, tasks, commands, StatusBarAlignment, Position, ViewColumn, ProgressLocation
 } from 'vscode';
 
 import {
@@ -91,8 +91,7 @@ export function activate(context: ExtensionContext) {
 			};
 			let clientOptions: LanguageClientOptions = {
 				documentSelector: [
-					{ scheme: 'untitled', language: 'xquery' },
-					{ scheme: 'file', language: 'xquery' }
+					{ scheme: 'untitled', language: 'xquery' }
 				],
 				diagnosticCollectionName: 'existdb',
 				outputChannel: outputChannel,
@@ -158,7 +157,7 @@ export function activate(context: ExtensionContext) {
 		}
 	});
 
-	commands.registerCommand('existdb.reconnect', () => {
+	let command = commands.registerCommand('existdb.reconnect', () => {
 		const editor = Window.activeTextEditor;
 		if (editor) {
 			const uri = editor.document.uri;
@@ -178,6 +177,85 @@ export function activate(context: ExtensionContext) {
 			}
 		}
 	});
+	context.subscriptions.push(command);
+
+	command = commands.registerCommand('existdb.execute', () => {
+		Window.withProgress({
+			location: ProgressLocation.Notification,
+			title: "Executing query!",
+			cancellable: false
+		}, (progress) => {
+			return new Promise((resolve, reject) => {
+				const editor = Window.activeTextEditor;
+				if (editor) {
+					const text = editor.document.getText();
+					const uri = editor.document.uri;
+					let folder = Workspace.getWorkspaceFolder(uri);
+					let result;
+					if ((!folder || uri.scheme === 'untitled')) {
+						result = defaultClient.sendRequest('workspace/executeCommand', {
+							command: 'execute',
+							arguments: [uri.toString(), text]
+						});
+					} else {
+						folder = getOuterMostWorkspaceFolder(folder);
+						const client = clients.get(folder.uri.toString());
+						if (client) {
+							result = client.sendRequest('workspace/executeCommand', {
+								command: 'execute',
+								arguments: [uri.toString(), text]
+							});
+						}
+					}
+					if (result) {
+						result.then((result) => {
+							let content = result.results;
+							if (result.hits) {
+								let message = `Query returned ${result.hits} in ${result.elapsed}ms.`;
+								if (result.hits > 100) {
+									message += ' Showing first 100 results.';
+								}
+								switch (result.output) {
+									case 'xml':
+									case 'html':
+									case 'html5':
+										content = `<!-- ${message} -->\n${result.results}`;
+										break;
+									case 'json':
+										content = result.results;
+										break;
+									default:
+										content = `(:  ${message} :)\n${result.results}`;
+										break;
+								}
+							}
+							if (result.output === 'html' || result.output === 'html5' ||
+								result.output === 'xhtml') {
+								const panel = Window.createWebviewPanel(
+									'existdb-query',
+									'eXistdb Query Result',
+									ViewColumn.Beside
+								);
+
+								panel.webview.html = content;
+							} else {
+								Workspace.openTextDocument({ content: content, language: result.output }).then((document) => {
+									Window.showTextDocument(document, ViewColumn.Beside);
+								});
+							}
+							resolve();
+						}).catch((error) => {
+							Window.showWarningMessage(`Could not query server: ${error}`);
+							reject();
+						});
+					}
+				}
+			});
+		});
+	});
+	context.subscriptions.push(command);
+
+
 }
 
 function initTasks(syncScript: string) {
