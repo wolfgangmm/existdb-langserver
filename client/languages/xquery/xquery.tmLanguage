@@ -8,6 +8,7 @@
 		<string>xql</string>
 		<string>xqm</string>
 		<string>xqy</string>
+		<string>xqs</string>
 		<string>xquery</string>
 	</array>
 	<key>firstLineMatch</key>
@@ -328,13 +329,19 @@
 		</dict>
 		<dict>
 			<key>match</key>
+			<string>=&gt;</string>
+			<key>name</key>
+			<string>keyword.control.flow.xquery</string>
+		</dict>
+		<dict>
+			<key>match</key>
 			<string>(?&lt;![:\-_a-zA-Z0-9])(\+|-|&lt;=?|&gt;=?|eq|ne|lt|le|ge|gt|\*|div|idiv|mod)(?![:\-_a-zA-Z0-9])</string>
 			<key>name</key>
 			<string>keyword.operator.arithmetic.xquery</string>
 		</dict>
 		<dict>
 			<key>match</key>
-			<string>(?&lt;![:\-_a-zA-Z0-9])((fn:)?(abs|adjust-date-to-timezone|adjust-dateTime-to-timezone|adjust-time-to-timezone|analyze-string|avg|base-uri|boolean|ceiling|codepoint-equal|codepoints-to-string|collection|compare|concat|contains|count|current-date|current-dateTime|current-time|data|dateTime|day-from-date|day-from-dateTime|days-from-duration|deep-equal|default-collation|distinct-values|doc|doc-available|document|document-uri|empty|encode-for-uri|ends-with|error|escape-html-uri|escape-uri|exactly-one|exists|false|filter|floor|fold-left|fold-right|format-date|format-dateTime|format-number|format-time|function-arity|function-available|function-lookup|function-name|generate-id|head|hours-from-dateTime|hours-from-duration|hours-from-time|id|idref|implicit-timezone|in-scope-prefixes|index-of|insert-before|iri-to-uri|lang|last|local-name|local-name-from-QName|lower-case|map|map-pairs|matches|max|min|minutes-from-dateTime|minutes-from-duration|minutes-from-time|month-from-date|month-from-dateTime|months-from-duration|name|namespace-uri|namespace-uri-for-prefix|namespace-uri-from-QName|nilled|node-name|normalize-space|normalize-unicode|not|number|one-or-more|position|prefix-from-QName|QName|remove|replace|resolve-QName|resolve-uri|reverse|root|round|round-half-to-even|seconds-from-dateTime|seconds-from-duration|seconds-from-time|starts-with|static-base-uri|string|string-join|string-length|string-to-codepoints|subsequence|substring|substring-after|substring-before|sum|tail|timezone-from-date|timezone-from-dateTime|timezone-from-time|tokenize|trace|translate|true|type-available|unordered|unparsed-text|unparsed-text-available|upper-case|year-from-date|year-from-dateTime|years-from-duration|zero-or-one))(?=\s*\()</string>
+			<string>(?&lt;![:\-_a-zA-Z0-9])((fn:)?(abs|adjust-date-to-timezone|adjust-dateTime-to-timezone|adjust-time-to-timezone|analyze-string|avg|base-uri|boolean|ceiling|codepoint-equal|codepoints-to-string|collection|compare|concat|contains|count|current-date|current-dateTime|current-time|data|dateTime|day-from-date|day-from-dateTime|days-from-duration|deep-equal|default-collation|distinct-values|doc|doc-available|document|document-uri|empty|encode-for-uri|ends-with|error|escape-html-uri|escape-uri|exactly-one|exists|false|filter|floor|fold-left|fold-right|format-date|format-dateTime|format-number|format-time|function-arity|function-available|function-lookup|function-name|generate-id|head|hours-from-dateTime|hours-from-duration|hours-from-time|id|idref|implicit-timezone|in-scope-prefixes|index-of|insert-before|iri-to-uri|lang|last|local-name|local-name-from-QName|lower-case|map|map-pairs|matches|max|min|minutes-from-dateTime|minutes-from-duration|minutes-from-time|month-from-date|month-from-dateTime|months-from-duration|name|namespace-uri|namespace-uri-for-prefix|namespace-uri-from-QName|nilled|node-name|normalize-space|normalize-unicode|not|number|one-or-more|parse-ietf-date|position|prefix-from-QName|QName|random-number-generator|remove|replace|resolve-QName|resolve-uri|reverse|root|round|round-half-to-even|seconds-from-dateTime|seconds-from-duration|seconds-from-time|starts-with|static-base-uri|string|string-join|string-length|string-to-codepoints|subsequence|substring|substring-after|substring-before|sum|tail|timezone-from-date|timezone-from-dateTime|timezone-from-time|tokenize|trace|translate|true|type-available|unordered|unparsed-text|unparsed-text-available|upper-case|year-from-date|year-from-dateTime|years-from-duration|zero-or-one))(?=\s*\()</string>
 			<key>name</key>
 			<string>support.function.builtin.xquery</string>
 		</dict>
