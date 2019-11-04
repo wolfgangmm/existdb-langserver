@@ -11,8 +11,12 @@ import * as request from 'request';
 
 export function lintDocument(text: string, relPath: string, document: AnalyzedDocument, settings: ServerSettings): Promise<AnalyzedDocument | ResponseError<any>> {
 	document.diagnostics = [];
+	if (text.length == 0) {
+		return Promise.resolve(document);
+	}
 	xqlint(document.uri, text, document);
 	return serverLint(text, settings, relPath, document);
+
 }
 
 function serverLint(text: String, settings: ServerSettings, relPath: string, document: AnalyzedDocument): Promise<AnalyzedDocument | ResponseError<any>> {
