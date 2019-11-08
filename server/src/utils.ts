@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { WorkspaceFolder } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
+import { ConnectionError } from 'vscode-jsonrpc';
 
 // require('request-debug')(request);
 
@@ -19,30 +20,39 @@ export function readWorkspaceConfig(workspaceFolder: WorkspaceFolder): ServerSet
 	if (!fs.existsSync(config)) {
 		return null;
 	}
+
 	const configData = fs.readFileSync(config, 'utf8');
 	const json = JSON.parse(configData);
 	const sync = json.sync;
-	if (!sync) {
+	const servers = json.servers;
+	if (!servers) {
+		// invalid configuration: no server definition
 		return null;
 	}
 
-	const serverDef = sync.server;
-	if (!serverDef) {
+	if (sync && sync.server) {
+		const server = servers[sync.server];
+		if (server) {
+			return {
+				uri: server.server,
+				user: sync.user || server.user,
+				password: sync.password || server.password,
+				path: sync.root || server.root || "/db"
+			};
+		}
+	}
+
+	const allServers = Object.values(servers);
+	if (allServers.length === 0) {
 		return null;
 	}
-	const server = json.servers[serverDef];
-	if (!server) {
-		return null;
-	}
-	const user = sync.user || server.user;
-	const password = sync.password || server.password;
-	const settings: ServerSettings = {
+	const server: any = allServers[0];
+	return {
 		uri: server.server,
-		user: user,
-		password: password,
-		path: sync.root
+		user: server.user,
+		password: server.password,
+		path: server.root || '/db'
 	};
-	return settings;
 }
 
 export function checkServer(workspaceConfig: ServerSettings, resourcesDir: string): Promise<any | null> {

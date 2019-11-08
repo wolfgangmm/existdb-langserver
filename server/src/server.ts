@@ -231,6 +231,9 @@ documents.onDidChangeContent(async change => {
 connection.onExecuteCommand(params => {
 	switch (params.command) {
 		case 'reconnect':
+			if (workspaceFolder) {
+				workspaceConfig = readWorkspaceConfig(workspaceFolder);
+			}
 			return checkServerConnection();
 		case 'execute':
 			return executeQuery(params.arguments);
@@ -356,6 +359,14 @@ async function gotoDefinition(uri: string, position: Position) {
 	const settings = await getSettings();
 	return document.gotoDefinition(position, relPath, textDocument, settings);
 }
+
+connection.onDidChangeWatchedFiles(() => {
+	log(`Reloading workspace config`);
+	if (workspaceFolder) {
+		workspaceConfig = readWorkspaceConfig(workspaceFolder);
+	}
+	return checkServerConnection();
+});
 
 documents.listen(connection);
 

@@ -11,7 +11,7 @@ import {
 } from 'vscode';
 
 import {
-	LanguageClient, LanguageClientOptions, TransportKind
+	LanguageClient, LanguageClientOptions, TransportKind, RevealOutputChannelOn
 } from 'vscode-languageclient';
 
 const BINARIES_DIR = 'dist';
@@ -126,9 +126,14 @@ export function activate(context: ExtensionContext) {
 				diagnosticCollectionName: 'existdb',
 				workspaceFolder: folder,
 				outputChannel: outputChannel,
+				revealOutputChannelOn: RevealOutputChannelOn.Never,
 				initializationOptions: {
 					workspaceFolder: folder.uri.toString(),
 					resources: context.asAbsolutePath('resources')
+				},
+				synchronize: {
+					// notify server if .existdb.json file is changeds
+					fileEvents: Workspace.createFileSystemWatcher('**/.existdb.json')
 				}
 			};
 			let client = new LanguageClient('existdb-langserver', 'eXist Language Server', serverOptions, clientOptions);
