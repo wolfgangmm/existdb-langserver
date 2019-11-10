@@ -13,7 +13,7 @@ import {
 import { URI } from 'vscode-uri';
 import { ServerSettings } from './settings';
 import { AnalyzedDocument } from './analyzed-document';
-import { checkServer, installXar, readWorkspaceConfig } from './utils';
+import { checkServer, installXar, readWorkspaceConfig, createWorkspaceConfig } from './utils';
 import { lintDocument } from './linting';
 
 const defaultSettings: ServerSettings = {
@@ -141,7 +141,7 @@ connection.onInitialize((params) => {
 		capabilities.workspace && !!capabilities.workspace.workspaceFolders
 	);
 
-	connection.console.log(`[${workspaceName}] Started and initialized`);
+	connection.console.log(`[${workspaceName}] Started and initialized.`);
 
 	return {
 		capabilities: {
@@ -170,7 +170,7 @@ async function checkServerConnection() {
 			}
 			reportStatus('Connected', settings);
 		}).catch((message) => {
-			connection.window.showWarningMessage(message);
+			connection.window.showWarningMessage(`Connection failed: ${message}`);
 			connection.sendNotification('existdb/status', ['$(database) Disonnected', settings.uri]);
 		});
 	}
@@ -230,6 +230,8 @@ documents.onDidChangeContent(async change => {
 
 connection.onExecuteCommand(params => {
 	switch (params.command) {
+		case 'createConfig':
+			return createWorkspaceConfig(workspaceFolder);
 		case 'reconnect':
 			if (workspaceFolder) {
 				workspaceConfig = readWorkspaceConfig(workspaceFolder);

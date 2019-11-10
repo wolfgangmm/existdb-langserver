@@ -83,7 +83,10 @@ export function activate(context: ExtensionContext) {
 		let uri = document.uri;
 		let folder = Workspace.getWorkspaceFolder(uri);
 		// Untitled files go to a default client.
-		if ((!folder || uri.scheme === 'untitled') && !defaultClient) {
+		if (!folder || uri.scheme === 'untitled') {
+			if (defaultClient) {
+				return;
+			}
 			let debugOptions = { execArgv: ["--nolazy", "--inspect=6010"] };
 			let serverOptions = {
 				run: { module, transport: TransportKind.ipc },
@@ -181,6 +184,32 @@ export function activate(context: ExtensionContext) {
 				}
 			}
 		}
+	});
+	context.subscriptions.push(command);
+
+	command = commands.registerCommand('existdb.create-config', () => {
+		Window.showWorkspaceFolderPick().then(folder => {
+			if (!folder) {
+				Window.showWarningMessage('Editor does not contain any workspace folders.');
+				return;
+			}
+			folder = getOuterMostWorkspaceFolder(folder);
+			const uri = folder.uri.toString();
+			const client = clients.get(uri);
+			if (client) {
+				const result = client.sendRequest('workspace/executeCommand', {
+					command: 'createConfig',
+					arguments: [uri]
+				});
+				if (result) {
+					result.then((path: string) => {
+						Workspace.openTextDocument(Uri.file(path)).then(doc => {
+							Window.showTextDocument(doc);
+						});
+					});
+				}
+			}
+		});
 	});
 	context.subscriptions.push(command);
 

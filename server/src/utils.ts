@@ -4,9 +4,30 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { WorkspaceFolder } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
-import { ConnectionError } from 'vscode-jsonrpc';
 
 // require('request-debug')(request);
+
+const DEFAULT_CONFIG = {
+	servers: {
+		"localhost": {
+			server: "http://localhost:8080/exist",
+			user: "admin",
+			password: "",
+			root: ""
+		}
+	},
+	sync: {
+		server: "localhost",
+		ignore: [
+			'.existdb.json',
+			'.git/**',
+			'node_modules/**',
+			'bower_components/**',
+			'package*.json',
+			'.vscode/**'
+		]
+	}
+};
 
 /**
  * Check if the current workspace folder contains a `.existdb.json` file and
@@ -221,4 +242,21 @@ function getXar(resourcesDir: string): { version: string; path: string; } | null
 		}
 	}
 	return null;
+}
+
+export function createWorkspaceConfig(workspaceFolder: WorkspaceFolder) {
+	const uri = URI.parse(workspaceFolder.uri);
+	const config = path.join(uri.fsPath, '.existdb.json');
+	if (fs.existsSync(config)) {
+		return Promise.resolve(config);
+	}
+	return new Promise((resolve, reject) => {
+		fs.writeFile(config, JSON.stringify(DEFAULT_CONFIG, null, 4), (err) => {
+			if (err) {
+				reject(err);
+				return;
+			}
+			resolve(config);
+		});
+	})
 }

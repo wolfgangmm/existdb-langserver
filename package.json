@@ -44,6 +44,11 @@
                 "command": "existdb.execute",
                 "title": "Execute current XQuery on the server",
                 "category": "eXist-db"
+            },
+            {
+                "command": "existdb.create-config",
+                "title": "Create or edit configuration for folder",
+                "category": "eXist-db"
             }
         ],
         "menus": {

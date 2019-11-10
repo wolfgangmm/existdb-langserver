@@ -46,7 +46,6 @@ export class ExistTaskProvider implements TaskProvider {
 			if (!sync) {
 				return result;
 			}
-
 			const serverDef = sync.server;
 			if (!serverDef) {
 				return result;
@@ -55,7 +54,10 @@ export class ExistTaskProvider implements TaskProvider {
 			if (!server) {
 				return result;
 			}
-			const collection = sync.root;
+			const collection = sync.root || server.root;
+			if (!collection) {
+				return result;
+			}
 			const user = sync.user || server.user;
 			const password = sync.password || server.password;
 			const kind: ExistTaskDefinition = {
