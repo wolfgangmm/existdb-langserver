@@ -14,7 +14,7 @@ The client extension additionally includes XQuery syntax highlighting based on h
 
 ## Workspace Folders
 
-**Important**: Most language server features require that the edited file is associated with a workspace folder, which will be used as the context to resolve XQuery import paths etc. (see configuration section below). In Visual Studio Code, use ´File/Add Folder to Workspace` to add workspace folders. For files not associated with a workspace folder, only basic syntax highlighting will be provided.
+**Important**: Most language server features require that the edited file is associated with a workspace folder, which will be used as the context to resolve XQuery import paths etc. (see configuration section below). In Visual Studio Code, use `File/Add Folder to Workspace` to add workspace folders. For files not associated with a workspace folder, only basic syntax highlighting will be provided.
 
 ## Configuration
 
@@ -91,7 +91,7 @@ The configuration for the sync feature should be provided in an additional sync 
 An open XQuery file can be sent to the server for evaluation, using either
 
 * the command `existdb.execute` from the command palette
-* pressing the keyboard shortcut `ctrl-alt-enter´ (`command-option-enter` on a Mac)
+* pressing the keyboard shortcut `ctrl-alt-enter` (`command-option-enter` on a Mac)
 * selecting **Execute current XQuery on the server** from the editor title toolbar
 
 The result returned by eXist is displayed in a new column besides the currently open editor. If the XQuery defines serialization to HTML, the results will be shown in a web view. In all other cases, the source code of the result is displayed.

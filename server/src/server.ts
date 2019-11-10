@@ -168,7 +168,7 @@ async function checkServerConnection() {
 			if (response) {
 				connection.sendNotification('existdb/install', [response.message, response.xar]);
 			}
-			reportStatus('Connected', settings);
+			reportStatus(workspaceName, settings);
 		}).catch((message) => {
 			connection.window.showWarningMessage(`Connection failed: ${message}`);
 			connection.sendNotification('existdb/status', ['$(database) Disonnected', settings.uri]);
@@ -184,7 +184,7 @@ async function reportStatus(online: boolean | string, settings: ServerSettings |
 	if (typeof online === 'string') {
 		message = online;
 	} else {
-		message = online ? 'Connected' : 'Disconnected';
+		message = online ? workspaceName : 'Disconnected';
 	}
 	connection.sendNotification('existdb/status', [`$(database) ${message}`, settings.uri]);
 }
