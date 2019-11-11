@@ -3,7 +3,7 @@
 		"prefix": "fun",
 		"body": [
 			"declare function ${1}(${2}) {",
-			"\t${0}",
+			"\t${0:$TM_SELECTED_TEXT}",
 			"};"
 		],
 		"description": "Create an XQuery function"
@@ -60,5 +60,23 @@
 	"Let statement": {
 		"prefix": "let",
 		"body": "let $${1} := $0"
+	},
+	"String constructor": {
+		"prefix": "sc",
+		"body": "``[${0:$TM_SELECTED_TEXT}]``",
+		"description": "Insert a string constructor"
+	},
+	"String constructor interpolation": {
+		"prefix": "sci",
+		"body": "`{${0:$TM_SELECTED_TEXT}}`",
+		"description": "Insert XQuery code inside a string constructor"
+	},
+	"XQDoc comment for a function": {
+		"prefix": "fc",
+		"body": [
+			"(:~",
+			" : $0",
+			" :)"
+		]
 	}
 }
