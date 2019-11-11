@@ -265,9 +265,19 @@ export class AnalyzedDocument {
 			count: 100,
 			base: `${settings.path}/${relPath}`
 		};
+		const options = {
+			uri: `${settings.uri}/apps/atom-editor/execute`,
+			method: "POST",
+			form: params,
+			auth: {
+				user: settings.user,
+				password: settings.password,
+				sendImmediately: true
+			}
+		}
 		this.logger(`Execute query with output mode: ${params.output}, path: ${params.base}`);
 		return new Promise((resolve, reject) => {
-			request(this.getOptions(params, settings, 'execute'), (error, response, body) => {
+			request(options, (error, response, body) => {
 				if (!response) {
 					reject(error);
 				}
