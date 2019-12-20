@@ -241,7 +241,7 @@ export class AnalyzedDocument {
 						const symbol: Symbol = {
 							signature: item.text,
 							type: item.type,
-							snippet: item.snippet.replace(/\${(\d+):(.*?)}/g, '\${$1|$2|}'),
+							snippet: item.snippet.replace(/\:\$/g, ':\\\$'),
 							name: item.name,
 							documentation: item.description
 						};
@@ -465,7 +465,7 @@ export class AnalyzedDocument {
 		for (let i = 0; i < args.length; i++) {
 			const param = paramRe.exec(args[i]);
 			if (param) {
-				templates.push('${' + `${i + 1}|${param[0]}` + '|}');
+				templates.push('${' + `${i + 1}:\\${param[0]}` + '}');
 			}
 		}
 		return `${name}(${templates.join(', ')})`;
