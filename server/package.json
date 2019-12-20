@@ -1,6 +1,6 @@
 {
   "name": "existdb-langserver",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Language server for eXistdb/XQuery",
   "main": "dist/server.js",
   "scripts": {
