@@ -2,6 +2,10 @@
     "name": "existdb-vscode",
     "version": "1.0.0",
     "description": "Language server and client for eXist and XQuery",
+    "categories": [
+        "Programming Languages",
+        "Other"
+    ],
     "scripts": {
         "vscode:prepublish": "npm run clean && cd client && npm run update-vscode && cd .. && npm run webpack",
         "test-compile": "tsc -p ./",
@@ -21,9 +25,9 @@
     "author": "Wolfgang Meier",
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/wolfgangmm/existdb-langserver.git"
+        "url": "https://github.com/wolfgangmm/existdb-langserver.git"
     },
-    "publisher": "existdb",
+    "publisher": "eXist-db",
     "license": "GPL-3.0-or-later",
     "engines": {
         "vscode": "^1.33.0"
