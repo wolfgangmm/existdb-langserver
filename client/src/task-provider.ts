@@ -61,7 +61,7 @@ export class ExistTaskProvider implements TaskProvider {
 			const user = sync.user || server.user;
 			const password = sync.password || server.password;
 			const kind: ExistTaskDefinition = {
-				type: 'sync',
+				type: 'existdb-sync',
 				server: server.server,
 				user: user,
 				password: password,
