@@ -70,7 +70,7 @@ export class ExistTaskProvider implements TaskProvider {
 				ignore: sync.ignore
 			};
 			let command = `node ${this.syncScript} -s ${server.server} -u ${user} -p ${password}  `;
-			command += `-c ${collection} ${folder.uri.fsPath} -i ${sync.ignore.map(p => `"${p}"`).join(' ')}`;
+			command += `-c ${collection} "${folder.uri.fsPath}" -i ${sync.ignore.map(p => `"${p}"`).join(' ')}`;
 			const task = new Task(kind, TaskScope.Workspace, `sync-${folder.name}`, 'existdb', new ShellExecution(command));
 			result.push(task);
 		}
