@@ -95,11 +95,11 @@ function query(config: any, query: string) {
 	);
 }
 
-function createCollection(config: any, dir: string, relPath: string) {
-	const parentCol = path.dirname(relPath);
-	const name = path.basename(relPath);
-	console.log(chalk`Creating collection {blue ${name}} in {magenta ${parentCol}}`);
-	query(config, "xmldb:create-collection('" + config.collection + "/" + parentCol + "', '" + name + "')");
+function createCollection(config: any, relPath: string) {
+	console.log(chalk`Creating collection {blue ${relPath}} in {magenta ${config.collection}}`);
+	query(config, `fold-left(tokenize("${relPath}", "/"), "${config.collection}", function($parent, $component) {
+        xmldb:create-collection($parent, $component)
+    })`);
 }
 
 const argv = yargs.options({
@@ -150,5 +150,5 @@ watcher.on('unlinkDir', file => {
 	remove(argv, path.relative(dir, file));
 });
 watcher.on('addDir', added => {
-	createCollection(argv, added, path.relative(dir, added));
+	createCollection(argv, path.relative(dir, added));
 });
