@@ -6,13 +6,14 @@
 import { ExistTaskProvider } from './task-provider';
 import * as path from 'path';
 import {
-	workspace as Workspace, window as Window, ExtensionContext, TextDocument, OutputChannel,
-	WorkspaceFolder, Uri, Disposable, tasks, commands, StatusBarAlignment, Position, ViewColumn, ProgressLocation
+	workspace as Workspace, window as Window, languages as Languages, ExtensionContext, TextDocument, OutputChannel,
+	WorkspaceFolder, Uri, Disposable, tasks, commands, StatusBarAlignment, ViewColumn, ProgressLocation
 } from 'vscode';
 
 import {
 	LanguageClient, LanguageClientOptions, TransportKind, RevealOutputChannelOn
 } from 'vscode-languageclient';
+import QueryResultsProvider from './query-results-provider';
 
 const BINARIES_DIR = 'dist';
 
@@ -66,6 +67,11 @@ export function activate(context: ExtensionContext) {
 	let syncScript = context.asAbsolutePath(path.join('sync', BINARIES_DIR, 'sync.js'));
 	let module = context.asAbsolutePath(path.join('server', BINARIES_DIR, 'server.js'));
 	let outputChannel: OutputChannel = Window.createOutputChannel('eXistdb Language Server');
+	
+	const resultsProvider = new QueryResultsProvider();
+	const registration = Workspace.registerTextDocumentContentProvider("xmldb-query", resultsProvider);
+	context.subscriptions.push(registration);
+
 	const statusbar = Window.createStatusBarItem(StatusBarAlignment.Right, 100);
 
 	function onStatus(status: string, uri: string) {
@@ -273,8 +279,25 @@ export function activate(context: ExtensionContext) {
 
 								panel.webview.html = content;
 							} else {
-								Workspace.openTextDocument({ content: content, language: result.output }).then((document) => {
-									Window.showTextDocument(document, ViewColumn.Beside);
+								let lang;
+								switch (result.output) {
+									case 'adaptive':
+										lang = 'xquery';
+										break;
+									case 'html':
+									case 'html5':
+										lang = 'html';
+										break;
+									case 'json':
+										lang = 'json';
+										break;
+									default:
+										lang = 'xml';
+								}
+								resultsProvider.update(content);
+								Workspace.openTextDocument(resultsProvider.queryResultsUri).then((document) => {
+									Languages.setTextDocumentLanguage(document, lang);
+									Window.showTextDocument(document, { viewColumn: ViewColumn.Beside, preview: true, preserveFocus: true });
 								});
 							}
 							resolve();
