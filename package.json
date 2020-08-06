@@ -1,6 +1,6 @@
 {
     "name": "existdb-vscode",
-    "version": "1.0.1",
+    "version": "1.0.3",
     "description": "Language server and client for eXist and XQuery",
     "categories": [
         "Programming Languages",
@@ -52,6 +52,11 @@
             {
                 "command": "existdb.create-config",
                 "title": "Create or edit configuration for folder",
+                "category": "eXist-db"
+            },
+            {
+                "command": "existdb.control-sync",
+                "title": "Control folder synchronization to database",
                 "category": "eXist-db"
             }
         ],
@@ -139,7 +144,7 @@
         },
         "taskDefinitions": [
             {
-                "type": "sync",
+                "type": "existdb-sync",
                 "properties": {
                     "server": {
                         "type": "string",

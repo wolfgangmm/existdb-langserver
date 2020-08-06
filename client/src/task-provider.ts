@@ -38,25 +38,25 @@ export class ExistTaskProvider implements TaskProvider {
 		for (let folder of this.workspaceFolders) {
 			const config = path.join(folder.uri.fsPath, '.existdb.json');
 			if (!fs.existsSync(config)) {
-				return result;
+				continue;
 			}
 			const configData = fs.readFileSync(config, 'utf8');
 			const json = JSON.parse(configData);
 			const sync = json.sync;
 			if (!sync) {
-				return result;
+				continue;
 			}
 			const serverDef = sync.server;
 			if (!serverDef) {
-				return result;
+				continue;
 			}
 			const server = json.servers[serverDef];
 			if (!server) {
-				return result;
+				continue;
 			}
 			const collection = sync.root || server.root;
 			if (!collection) {
-				return result;
+				continue;
 			}
 			const user = sync.user || server.user;
 			const password = sync.password || server.password;

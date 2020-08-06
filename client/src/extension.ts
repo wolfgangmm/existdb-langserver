@@ -7,13 +7,20 @@ import { ExistTaskProvider } from './task-provider';
 import * as path from 'path';
 import {
 	workspace as Workspace, window as Window, languages as Languages, ExtensionContext, TextDocument, OutputChannel,
-	WorkspaceFolder, Uri, Disposable, tasks, commands, StatusBarAlignment, ViewColumn, ProgressLocation
+	WorkspaceFolder, Uri, Disposable, tasks, commands, StatusBarAlignment, ViewColumn, ProgressLocation,
+	Task, TaskExecution, QuickPickItem
 } from 'vscode';
 
 import {
-	LanguageClient, LanguageClientOptions, TransportKind, RevealOutputChannelOn
-} from 'vscode-languageclient';
+	LanguageClient, LanguageClientOptions, TransportKind, RevealOutputChannelOn, Command
+} from 'vscode-languageclient';	
 import QueryResultsProvider from './query-results-provider';
+
+class TaskPickItem implements QuickPickItem {
+	label: string;
+	task?: Task;
+	execution?: TaskExecution;
+}
 
 const BINARIES_DIR = 'dist';
 
@@ -79,6 +86,28 @@ export function activate(context: ExtensionContext) {
 		statusbar.tooltip = `eXist-db: ${uri}`;
 		statusbar.show();
 	}
+
+	const taskStatusbar = Window.createStatusBarItem(StatusBarAlignment.Right, 100);
+	taskStatusbar.text = "$(sync-ignored) off";
+	taskStatusbar.tooltip = "eXist-db: click to configure automatic synchronization";
+	taskStatusbar.command = "existdb.control-sync";
+	taskStatusbar.show();
+
+	function checkSyncTasks() {
+		const running = [];
+		tasks.taskExecutions.forEach((exec) => {
+			if (exec.task.name && exec.task.name.startsWith('sync-')) {
+				running.push(exec.task.name.substring(5));
+			}
+		});
+		if (running.length === 0) {
+			taskStatusbar.text = "$(sync-ignored) off";
+		} else {
+			taskStatusbar.text = `$(sync) ${running.join(' | ')}`;
+		}
+	}
+	tasks.onDidStartTask(checkSyncTasks);
+	tasks.onDidEndTask(checkSyncTasks);
 
 	function didOpenTextDocument(document: TextDocument): void {
 		// We are only interested in language mode text
@@ -215,6 +244,44 @@ export function activate(context: ExtensionContext) {
 					});
 				}
 			}
+		});
+	});
+	context.subscriptions.push(command);
+
+	command = commands.registerCommand('existdb.control-sync', (ev) => {
+		console.log(ev);
+		let picks: TaskPickItem[] = [];
+		tasks.fetchTasks().then((t) => {
+			t.forEach((task) => {
+				Workspace.workspaceFolders.forEach((folder) => {
+					const name = `sync-${folder.name}`;
+					if (task.name === name) {
+						const exec = tasks.taskExecutions.find((exec) => exec.task.name === name);
+						let item: TaskPickItem;
+						if (exec) {
+							item = {
+								label: `$(sync) ${folder.name}: stop synchronization`,
+								execution: exec
+							};
+							picks.push(item);
+						} else {
+							item = {
+								label: `$(sync-ignored) ${folder.name}: start synchronization`,
+								task: task
+							};
+							picks.push(item);
+						}
+					}
+				});
+			});
+			Window.showQuickPick(picks, { placeHolder: 'root directory', canPickMany: false })
+				.then((pick) => {
+					if (pick.execution) {
+						pick.execution.terminate();
+					} else if (pick.task) {
+						tasks.executeTask(pick.task);
+					}
+				});
 		});
 	});
 	context.subscriptions.push(command);
