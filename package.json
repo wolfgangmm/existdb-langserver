@@ -58,6 +58,11 @@
                 "command": "existdb.control-sync",
                 "title": "Control folder synchronization to database",
                 "category": "eXist-db"
+            },
+            {
+                "command": "existdb.deploy",
+                "title": "Deploy package to the database",
+                "category": "eXist-db"
             }
         ],
         "menus": {
@@ -70,6 +75,13 @@
                 {
                     "when": "editorLangId == xquery",
                     "command": "existdb.execute",
+                    "group": "2_existdb"
+                }
+            ],
+            "explorer/context": [
+                {
+                    "when": "resourceExtname == .xar",
+                    "command": "existdb.deploy",
                     "group": "2_existdb"
                 }
             ]

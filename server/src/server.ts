@@ -189,19 +189,29 @@ async function reportStatus(online: boolean | string, settings: ServerSettings |
 	connection.sendNotification('existdb/status', [`$(database) ${message}`, settings.uri]);
 }
 
-connection.onNotification('existdb/install', async (xar) => {
+async function deployXar(args: any[] | undefined) {
+	if (!args) {
+		return;
+	}
+	const [xar] = args;
 	const settings = await getSettings();
 	log(`Installing server-side XAR on ${settings.uri}`);
-	installXar(settings, xar).then((success) => {
-		if (!success) {
-			connection.window.showWarningMessage('Installing server-side helper failed!');
-		} else {
-			connection.window.showInformationMessage('Server-side helper installed.');
-		}
-	}).catch((error) => {
-		connection.console.log(`Connecting to server failed: ${error}`);
+	return new Promise((resolve, reject) => {
+		installXar(settings, xar).then((success) => {
+			if (!success) {
+				connection.window.showWarningMessage('Installing XAR failed!');
+				reject();
+			} else {
+				connection.window.showInformationMessage('XAR installed.');
+				resolve();
+			}
+		}).catch((error) => {
+			connection.console.log(`Connecting to server failed: ${error}`);
+			connection.window.showWarningMessage(`Connecting to server failed: ${error}`);
+			reject();
+		});
 	});
-});
+}
 
 connection.onInitialized(async () => {
 	if (hasConfigurationCapability) {
@@ -237,6 +247,8 @@ connection.onExecuteCommand(params => {
 				workspaceConfig = readWorkspaceConfig(workspaceFolder);
 			}
 			return checkServerConnection();
+		case 'deploy':
+			return deployXar(params.arguments);
 		case 'execute':
 			return executeQuery(params.arguments);
 	}

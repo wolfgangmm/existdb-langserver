@@ -63,9 +63,18 @@ function getOuterMostWorkspaceFolder(folder: WorkspaceFolder): WorkspaceFolder {
 let taskProvider: Disposable | undefined;
 
 function onXarInstallRequest(client: LanguageClient, message: string, xar): void {
-	Window.showInformationMessage(message, 'Install').then((action) => {
+	Window.showWarningMessage(message, 'Install').then((action) => {
 		if (action) {
-			client.sendNotification('existdb/install', [xar]);
+			Window.withProgress({
+				location: ProgressLocation.Notification,
+				title: "Installing helper xar",
+				cancellable: false
+			}, (progress) => {
+				return client.sendRequest('workspace/executeCommand', {
+					command: 'deploy',
+					arguments: [xar]
+				});
+			});
 		}
 	});
 }
@@ -249,7 +258,6 @@ export function activate(context: ExtensionContext) {
 	context.subscriptions.push(command);
 
 	command = commands.registerCommand('existdb.control-sync', (ev) => {
-		console.log(ev);
 		let picks: TaskPickItem[] = [];
 		tasks.fetchTasks().then((t) => {
 			t.forEach((task) => {
@@ -379,7 +387,50 @@ export function activate(context: ExtensionContext) {
 	});
 	context.subscriptions.push(command);
 
+	command = commands.registerCommand('existdb.deploy', (ev) => {
+		if (ev && ev.path) {
+			deploy({ path: ev.path });
+		} else {
+			Workspace.findFiles('**/*.xar')
+				.then((uris) => {
+					const xars = uris.map((uri) => uri.fsPath);
+					Window.showQuickPick(xars)
+						.then((xar) => {
+							deploy({ path: xar });
+						});
+				});
+		}
+	});
+	context.subscriptions.push(command);
+}
 
+function deploy(xar: any) {
+	const editor = Window.activeTextEditor;
+	if (editor) {
+		const uri = editor.document.uri;
+		let folder = Workspace.getWorkspaceFolder(editor.document.uri);
+		Window.withProgress({
+			location: ProgressLocation.Notification,
+			title: `Installing xar ${xar.path}`,
+			cancellable: false
+		}, (progress) => {
+			if ((!folder || uri.scheme === 'untitled')) {
+				return defaultClient.sendRequest('workspace/executeCommand', {
+					command: 'deploy',
+					arguments: [xar]
+				});
+			} else {
+				folder = getOuterMostWorkspaceFolder(folder);
+				const client = clients.get(folder.uri.toString());
+				if (client) {
+					return client.sendRequest('workspace/executeCommand', {
+						command: 'deploy',
+						arguments: [xar]
+					});
+				}
+			}
+		});
+	}
 }
 
 function initTasks(syncScript: string) {
