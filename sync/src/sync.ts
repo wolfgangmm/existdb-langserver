@@ -132,7 +132,8 @@ const ignored = argv.i.map(p => {
 
 const watcher = chokidar.watch(dir, {
 	ignored: ignored,
-	ignoreInitial: true
+	ignoreInitial: true,
+	awaitWriteFinish: true
 });
 if (watcher.options.useFsEvents) {
 	console.log(chalk`{dim Using fs events.}`);
