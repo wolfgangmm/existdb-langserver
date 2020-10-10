@@ -2,9 +2,9 @@ import * as yargs from 'yargs';
 import * as chokidar from 'chokidar';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as request from 'request';
 import * as mime from 'mime';
 import chalk from 'chalk';
+import Axios from 'axios';
 
 mime.define({
 	'application/xquery': ['xq', 'xql', 'xqm', 'xquery'],
@@ -14,85 +14,74 @@ mime.define({
 function store(config: any, file: string, relPath: string, add: boolean = false) {
 	const url = config.server + "/apps/atom-editor/store" + config.collection + "/" + relPath;
 	const contentType = mime.getType(path.extname(file));
-	const stat = fs.statSync(file);
-
-	const options = {
-		uri: url,
-		method: "PUT",
-		auth: {
-			user: config.user,
-			pass: config.password || "",
-			sendImmediately: true
-		},
-		headers: {
-			"Content-Type": contentType,
-			"Content-Length": stat.size
-		}
-	};
+	const {size} = fs.statSync(file);
 
 	console.log(chalk`Uploading {blue ${relPath}} as {magenta ${contentType}}...`);
 
-	const self = this;
-	fs.createReadStream(file).pipe(
-		request(
-			options,
-			(error, response, body) => {
-				if (error || !(response.statusCode == 200 || response.statusCode == 201)) {
-					console.log(chalk`Upload of {red ${relPath}} failed`);
-					response.pipe(process.stderr);
-				}
-				if (contentType === "application/xquery" && add) {
-					query(config, "sm:chmod(xs:anyURI('" + config.collection + "/" + relPath + "'), 'rwxr-xr-x')");
-				}
-			}
-		)
-	);
+	Axios.request({
+		url: url,
+		method: 'PUT',
+		auth: {
+			username: config.user,
+			password: config.password || ""
+		},
+		headers: {
+			"Content-Type": contentType,
+			"Content-Length": size
+		},
+		data: fs.createReadStream(file),
+		responseType: 'json'
+	}).then((response) => {
+		if (!(response.status == 200 || response.status == 201) || response.data.status === 'error') {
+			console.log(chalk`Upload of {red ${relPath}} failed: ${response.data.message}`);
+			return;
+		}
+		if (contentType === "application/xquery" && add) {
+			query(config, "sm:chmod(xs:anyURI('" + config.collection + "/" + relPath + "'), 'rwxr-xr-x')");
+		}
+	}).catch((error) => {
+		console.log(chalk`Upload of {red ${relPath}} failed: {red ${error.code}}`);
+	});
 }
 
 function remove(config: any, relPath: string) {
 	const url = config.server + "/apps/atom-editor/delete" + config.collection + "/" + relPath;
-	const options = {
-		uri: url,
+	console.log(chalk`Deleting {blue ${relPath}} ...`);
+	Axios.request({
+		url: url,
 		method: "GET",
 		auth: {
-			user: config.user,
-			pass: config.password || "",
-			sendImmediately: true
+			username: config.user,
+			password: config.password || ""
 		}
-	};
-	console.log(chalk`Deleting {blue ${relPath}} ...`);
-	request(
-		options,
-		(error, response, body) => {
-			if (error || !(response.statusCode == 200 || response.statusCode == 201)) {
-				console.error(chalk`Failed to delete {red ${relPath}}`);
-				response.pipe(process.stderr);
-			}
+	}).then((response) => {
+		if (!(response.status == 200 || response.status == 201)) {
+			console.error(chalk`Failed to delete {red ${relPath}}`);
+			response.data.pipe(process.stderr);
 		}
-	);
+	}).catch((error) => {
+		console.error(chalk`Failed to delete {red ${relPath}}: {red ${error.code}}`);
+	});
 }
 
 function query(config: any, query: string) {
 	const url = config.server + "/apps/atom-editor/run?q=" + encodeURIComponent(query);
-	const options = {
-		uri: url,
+	Axios.request({
+		url: url,
 		method: "GET",
-		json: true,
 		auth: {
-			user: config.user,
-			pass: config.password || "",
-			sendImmediately: true
+			username: config.user,
+			password: config.password || ""
+		},
+		responseType: 'json'
+	}).then((response) => {
+		if (!(response.status == 200 || response.status == 201)) {
+			console.log('Query failed');
+			response.data.pipe(process.stderr);
 		}
-	};
-	request(
-		options,
-		function (error, response, body) {
-			if (error || !(response.statusCode == 200 || response.statusCode == 201)) {
-				console.log('Query failed');
-				response.pipe(process.stderr);
-			}
-		}
-	);
+	}).catch((error) => {
+		console.error(chalk`Query failed: {red ${error.code}}`);
+	});
 }
 
 function createCollection(config: any, relPath: string) {
