@@ -78,7 +78,7 @@ export function readWorkspaceConfig(workspaceFolder: WorkspaceFolder): ServerSet
 
 export function checkServer(workspaceConfig: ServerSettings, resourcesDir: string): Promise<any | null> {
 	if (!workspaceConfig) {
-		return Promise.resolve(null);
+		return Promise.reject('No workspace config');
 	}
 	const xar = getXar(resourcesDir);
 	if (!xar) {
@@ -104,22 +104,25 @@ export function checkServer(workspaceConfig: ServerSettings, resourcesDir: strin
 		else
 			false()`;
 	return new Promise((resolve, reject) => {
-		query(workspaceConfig, xquery).then((body) => {
-			let message;
-			if (body === true) {
-				resolve(null);
-			} else if (typeof body === 'string') {
-				message = `Installed support app has version ${body}. A newer version (${xar.version}) is recommended for proper operation. Do you want to install it?`;
-			} else {
-				message = "This package requires a small support app to be installed on the eXistdb server. Do you want to install it?";
+		query(workspaceConfig, xquery).then(
+			(body) => {
+				let message;
+				if (body === true) {
+					resolve(null);
+				} else if (typeof body === 'string') {
+					message = `Installed support app has version ${body}. A newer version (${xar.version}) is recommended for proper operation. Do you want to install it?`;
+				} else {
+					message = "This package requires a small support app to be installed on the eXistdb server. Do you want to install it?";
+				}
+				resolve({
+					message: message,
+					xar: xar
+				});
+			}, 
+			(statusCode) => {
+				reject(`Connection to server failed ${statusCode}`);
 			}
-			resolve({
-				message: message,
-				xar: xar
-			});
-		}).catch(statusCode => {
-			reject(`Connection to server failed ${statusCode}`);
-		});
+		);
 	});
 }
 
@@ -195,7 +198,7 @@ export async function installXar(settings: ServerSettings | null, xar: any): Pro
 						return
 							repo:get-root()
 					`;
-					query(settings, xquery).then(resolve).catch(reject);
+					query(settings, xquery).then(resolve, reject);
 				}
 			)
 		);

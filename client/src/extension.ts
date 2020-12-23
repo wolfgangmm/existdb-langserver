@@ -12,7 +12,7 @@ import {
 } from 'vscode';
 
 import {
-	LanguageClient, LanguageClientOptions, TransportKind, RevealOutputChannelOn, Command
+	LanguageClient, LanguageClientOptions, TransportKind, RevealOutputChannelOn, Command, GenericNotificationHandler
 } from 'vscode-languageclient';	
 import QueryResultsProvider from './query-results-provider';
 
@@ -24,8 +24,13 @@ class TaskPickItem implements QuickPickItem {
 
 const BINARIES_DIR = 'dist';
 
+let context: ExtensionContext;
+let onStatus : GenericNotificationHandler;
+
 let defaultClient: LanguageClient;
 let clients: Map<string, LanguageClient> = new Map();
+
+let outputChannel: OutputChannel = Window.createOutputChannel('eXistdb Language Server');
 
 let _sortedWorkspaceFolders: string[] | undefined;
 function sortedWorkspaceFolders(): string[] {
@@ -79,10 +84,80 @@ function onXarInstallRequest(client: LanguageClient, message: string, xar): void
 	});
 }
 
-export function activate(context: ExtensionContext) {
-	let syncScript = context.asAbsolutePath(path.join('sync', BINARIES_DIR, 'sync.js'));
+function startClient(folder?: WorkspaceFolder) {
 	let module = context.asAbsolutePath(path.join('server', BINARIES_DIR, 'server.js'));
-	let outputChannel: OutputChannel = Window.createOutputChannel('eXistdb Language Server');
+	if (!folder) {
+		if (defaultClient) {
+			return defaultClient;
+		}
+		let debugOptions = { execArgv: ["--nolazy", "--inspect=6010"] };
+		let serverOptions = {
+			run: { module, transport: TransportKind.ipc },
+			debug: { module, transport: TransportKind.ipc, options: debugOptions }
+		};
+		let clientOptions: LanguageClientOptions = {
+			documentSelector: [
+				{ scheme: 'untitled', language: 'xquery' }
+			],
+			diagnosticCollectionName: 'existdb',
+			outputChannel: outputChannel,
+			initializationOptions: {
+				resources: context.asAbsolutePath('resources')
+			}
+		};
+		defaultClient = new LanguageClient('existdb-langserver', 'eXist Language Server', serverOptions, clientOptions);
+		defaultClient.onReady().then(() => {
+			defaultClient.onNotification('existdb/install', (message: string, xar) => {
+				onXarInstallRequest(defaultClient, message, xar);
+			});
+			defaultClient.onNotification('existdb/status', onStatus);
+		});
+		defaultClient.start();
+		return defaultClient;
+	}
+	// If we have nested workspace folders we only start a server on the outer most workspace folder.
+	folder = getOuterMostWorkspaceFolder(folder);
+
+	if (!clients.has(folder.uri.toString())) {
+		let debugOptions = { execArgv: ["--nolazy", `--inspect=${6011 + clients.size}`] };
+		let serverOptions = {
+			run: { module, transport: TransportKind.ipc },
+			debug: { module, transport: TransportKind.ipc, options: debugOptions }
+		};
+		let clientOptions: LanguageClientOptions = {
+			documentSelector: [
+				{ scheme: 'file', language: 'xquery', pattern: `${folder.uri.fsPath}/**/*` }
+			],
+			diagnosticCollectionName: 'existdb',
+			workspaceFolder: folder,
+			outputChannel: outputChannel,
+			revealOutputChannelOn: RevealOutputChannelOn.Never,
+			initializationOptions: {
+				workspaceFolder: folder.uri.toString(),
+				resources: context.asAbsolutePath('resources')
+			},
+			synchronize: {
+				// notify server if .existdb.json file is changeds
+				fileEvents: Workspace.createFileSystemWatcher('**/.existdb.json')
+			}
+		};
+		let client = new LanguageClient('existdb-langserver', 'eXist Language Server', serverOptions, clientOptions);
+		client.onReady().then(() => {
+			client.onNotification('existdb/install', (message: string, xar) => {
+				onXarInstallRequest(client, message, xar);
+			});
+			client.onNotification('existdb/status', onStatus);
+		});
+		client.start();
+		clients.set(folder.uri.toString(), client);
+		return client;
+	}
+	return clients.get(folder.uri.toString());
+}
+
+export function activate(extensionContext: ExtensionContext) {
+	context = extensionContext;
+	let syncScript = context.asAbsolutePath(path.join('sync', BINARIES_DIR, 'sync.js'));
 	
 	const resultsProvider = new QueryResultsProvider();
 	const registration = Workspace.registerTextDocumentContentProvider("xmldb-query", resultsProvider);
@@ -90,7 +165,7 @@ export function activate(context: ExtensionContext) {
 
 	const statusbar = Window.createStatusBarItem(StatusBarAlignment.Right, 100);
 
-	function onStatus(status: string, uri: string) {
+	onStatus = function(status: string, uri: string) {
 		statusbar.text = `${status}`;
 		statusbar.tooltip = `eXist-db: ${uri}`;
 		statusbar.show();
@@ -128,77 +203,16 @@ export function activate(context: ExtensionContext) {
 		let folder = Workspace.getWorkspaceFolder(uri);
 		// Untitled files go to a default client.
 		if (!folder || uri.scheme === 'untitled') {
-			if (defaultClient) {
-				return;
-			}
-			let debugOptions = { execArgv: ["--nolazy", "--inspect=6010"] };
-			let serverOptions = {
-				run: { module, transport: TransportKind.ipc },
-				debug: { module, transport: TransportKind.ipc, options: debugOptions }
-			};
-			let clientOptions: LanguageClientOptions = {
-				documentSelector: [
-					{ scheme: 'untitled', language: 'xquery' }
-				],
-				diagnosticCollectionName: 'existdb',
-				outputChannel: outputChannel,
-				initializationOptions: {
-					resources: context.asAbsolutePath('resources')
-				}
-			};
-			defaultClient = new LanguageClient('existdb-langserver', 'eXist Language Server', serverOptions, clientOptions);
-			defaultClient.onReady().then(() => {
-				defaultClient.onNotification('existdb/install', (message: string, xar) => {
-					onXarInstallRequest(defaultClient, message, xar);
-				});
-				defaultClient.onNotification('existdb/status', onStatus);
-			});
-			defaultClient.start();
-			return;
-		}
-
-		// If we have nested workspace folders we only start a server on the outer most workspace folder.
-		folder = getOuterMostWorkspaceFolder(folder);
-
-		if (!clients.has(folder.uri.toString())) {
-			let debugOptions = { execArgv: ["--nolazy", `--inspect=${6011 + clients.size}`] };
-			let serverOptions = {
-				run: { module, transport: TransportKind.ipc },
-				debug: { module, transport: TransportKind.ipc, options: debugOptions }
-			};
-			let clientOptions: LanguageClientOptions = {
-				documentSelector: [
-					{ scheme: 'file', language: 'xquery', pattern: `${folder.uri.fsPath}/**/*` }
-				],
-				diagnosticCollectionName: 'existdb',
-				workspaceFolder: folder,
-				outputChannel: outputChannel,
-				revealOutputChannelOn: RevealOutputChannelOn.Never,
-				initializationOptions: {
-					workspaceFolder: folder.uri.toString(),
-					resources: context.asAbsolutePath('resources')
-				},
-				synchronize: {
-					// notify server if .existdb.json file is changeds
-					fileEvents: Workspace.createFileSystemWatcher('**/.existdb.json')
-				}
-			};
-			let client = new LanguageClient('existdb-langserver', 'eXist Language Server', serverOptions, clientOptions);
-			client.onReady().then(() => {
-				client.onNotification('existdb/install', (message: string, xar) => {
-					onXarInstallRequest(client, message, xar);
-				});
-				client.onNotification('existdb/status', onStatus);
-			});
-			client.start();
-			clients.set(folder.uri.toString(), client);
+			startClient();
 		}
 	}
 
 	initTasks(syncScript);
 
-	Workspace.onDidOpenTextDocument(didOpenTextDocument);
-	Workspace.textDocuments.forEach(didOpenTextDocument);
+	Workspace.workspaceFolders.forEach(folder => startClient(folder));
+
+	// Workspace.onDidOpenTextDocument(didOpenTextDocument);
+	// Workspace.textDocuments.forEach(didOpenTextDocument);
 	Workspace.onDidChangeWorkspaceFolders((event) => {
 		for (let folder of event.removed) {
 			let client = clients.get(folder.uri.toString());
@@ -207,6 +221,7 @@ export function activate(context: ExtensionContext) {
 				client.stop();
 			}
 		}
+		event.added.forEach(folder => startClient(folder));
 	});
 
 	let command = commands.registerCommand('existdb.reconnect', () => {
@@ -405,32 +420,33 @@ export function activate(context: ExtensionContext) {
 }
 
 function deploy(xar: any) {
+	let client;
 	const editor = Window.activeTextEditor;
 	if (editor) {
 		const uri = editor.document.uri;
 		let folder = Workspace.getWorkspaceFolder(editor.document.uri);
-		Window.withProgress({
-			location: ProgressLocation.Notification,
-			title: `Installing xar ${xar.path}`,
-			cancellable: false
-		}, (progress) => {
-			if ((!folder || uri.scheme === 'untitled')) {
-				return defaultClient.sendRequest('workspace/executeCommand', {
-					command: 'deploy',
-					arguments: [xar]
-				});
-			} else {
-				folder = getOuterMostWorkspaceFolder(folder);
-				const client = clients.get(folder.uri.toString());
-				if (client) {
-					return client.sendRequest('workspace/executeCommand', {
-						command: 'deploy',
-						arguments: [xar]
-					});
-				}
-			}
-		});
+		if (folder && uri.scheme !== 'untitled') {
+			folder = getOuterMostWorkspaceFolder(folder);
+			client = clients.get(folder.uri.toString());
+		}
 	}
+	if (!client) {
+		if (clients.size > 0) {
+			client = clients.values().next().value;
+		} else {
+			client = startClient();
+		}
+	}
+	Window.withProgress({
+		location: ProgressLocation.Notification,
+		title: `Installing xar ${xar.path}`,
+		cancellable: false
+	}, (progress) => {
+		return client.sendRequest('workspace/executeCommand', {
+			command: 'deploy',
+			arguments: [xar]
+		});
+	});
 }
 
 function initTasks(syncScript: string) {
@@ -452,5 +468,7 @@ export function deactivate(): Thenable<void> {
 	for (let client of clients.values()) {
 		promises.push(client.stop());
 	}
+	context = undefined;
+	onStatus = undefined;
 	return Promise.all(promises).then(() => undefined);
 }

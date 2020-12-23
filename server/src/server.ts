@@ -33,9 +33,11 @@ let connection = createConnection(ProposedFeatures.all);
 let documents = new TextDocuments();
 let analyzedDocuments: Map<string, AnalyzedDocument> = new Map();
 
+const noWorkspace = 'no workspace';
+
 // The workspace folder this server is operating on
 let workspaceFolder: WorkspaceFolder;
-let workspaceName: string = 'no workspace';
+let workspaceName: string = noWorkspace;
 let workspaceConfig: ServerSettings | null = null;
 let resourcesDir: string;
 
@@ -168,8 +170,13 @@ async function checkServerConnection() {
 			if (response) {
 				connection.sendNotification('existdb/install', [response.message, response.xar]);
 			}
-			reportStatus(workspaceName, settings);
-		}).catch((message) => {
+			if (workspaceName !== noWorkspace) {
+				log(`Connection ok`);
+				reportStatus(workspaceName, settings);
+			}
+		},
+		(message) => {
+			log(`Connection failed: ${message}`);
 			connection.window.showWarningMessage(`Connection failed: ${message}`);
 			connection.sendNotification('existdb/status', ['$(database) Disonnected', settings.uri]);
 		});
@@ -191,25 +198,29 @@ async function reportStatus(online: boolean | string, settings: ServerSettings |
 
 async function deployXar(args: any[] | undefined) {
 	if (!args) {
+		log('No arguments provided for deployXar');
 		return;
 	}
 	const [xar] = args;
 	const settings = await getSettings();
 	log(`Installing server-side XAR on ${settings.uri}`);
 	return new Promise((resolve, reject) => {
-		installXar(settings, xar).then((success) => {
-			if (!success) {
-				connection.window.showWarningMessage('Installing XAR failed!');
+		installXar(settings, xar).then(
+			(success) => {
+				if (!success) {
+					connection.window.showWarningMessage('Installing XAR failed!');
+					reject();
+				} else {
+					connection.window.showInformationMessage('XAR installed.');
+					resolve();
+				}
+			},
+			(error) => {
+				log(`Connecting to server failed: ${error}`);
+				connection.window.showWarningMessage(`Connecting to server failed: ${error}`);
 				reject();
-			} else {
-				connection.window.showInformationMessage('XAR installed.');
-				resolve();
 			}
-		}).catch((error) => {
-			connection.console.log(`Connecting to server failed: ${error}`);
-			connection.window.showWarningMessage(`Connecting to server failed: ${error}`);
-			reject();
-		});
+		);
 	});
 }
 
@@ -239,6 +250,7 @@ documents.onDidChangeContent(async change => {
 });
 
 connection.onExecuteCommand(params => {
+	log(`Executing command ${params.command}`);
 	switch (params.command) {
 		case 'createConfig':
 			return createWorkspaceConfig(workspaceFolder);
