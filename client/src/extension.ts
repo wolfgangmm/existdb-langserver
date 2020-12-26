@@ -12,9 +12,11 @@ import {
 } from 'vscode';
 
 import {
-	LanguageClient, LanguageClientOptions, TransportKind, RevealOutputChannelOn, Command, GenericNotificationHandler
+	LanguageClient, LanguageClientOptions, TransportKind, RevealOutputChannelOn, Command, GenericNotificationHandler, FoldingRangeRequest
 } from 'vscode-languageclient';	
 import QueryResultsProvider from './query-results-provider';
+import { eXistFS } from "./filesystem-provider";
+import { getServerConfig } from "./util";
 
 class TaskPickItem implements QuickPickItem {
 	label: string;
@@ -36,6 +38,9 @@ let _sortedWorkspaceFolders: string[] | undefined;
 function sortedWorkspaceFolders(): string[] {
 	if (_sortedWorkspaceFolders === void 0) {
 		_sortedWorkspaceFolders = Workspace.workspaceFolders ? Workspace.workspaceFolders.map(folder => {
+			if (folder.uri.scheme !== 'file') {
+				return;
+			}
 			let result = folder.uri.toString();
 			if (result.charAt(result.length - 1) !== '/') {
 				result = result + '/';
@@ -52,6 +57,9 @@ function sortedWorkspaceFolders(): string[] {
 Workspace.onDidChangeWorkspaceFolders(() => _sortedWorkspaceFolders = undefined);
 
 function getOuterMostWorkspaceFolder(folder: WorkspaceFolder): WorkspaceFolder {
+	if (folder.uri.scheme !== 'file') {
+		return folder;
+	}
 	let sorted = sortedWorkspaceFolders();
 	for (let element of sorted) {
 		let uri = folder.uri.toString();
@@ -157,6 +165,10 @@ function startClient(folder?: WorkspaceFolder) {
 
 export function activate(extensionContext: ExtensionContext) {
 	context = extensionContext;
+
+	const fs = new eXistFS();
+	context.subscriptions.push(Workspace.registerFileSystemProvider('xmldb', fs, { isCaseSensitive: true }));
+	
 	let syncScript = context.asAbsolutePath(path.join('sync', BINARIES_DIR, 'sync.js'));
 	
 	const resultsProvider = new QueryResultsProvider();
@@ -192,20 +204,6 @@ export function activate(extensionContext: ExtensionContext) {
 	}
 	tasks.onDidStartTask(checkSyncTasks);
 	tasks.onDidEndTask(checkSyncTasks);
-
-	function didOpenTextDocument(document: TextDocument): void {
-		// We are only interested in language mode text
-		if (document.languageId !== 'xquery' || (document.uri.scheme !== 'file' && document.uri.scheme !== 'untitled')) {
-			return;
-		}
-
-		let uri = document.uri;
-		let folder = Workspace.getWorkspaceFolder(uri);
-		// Untitled files go to a default client.
-		if (!folder || uri.scheme === 'untitled') {
-			startClient();
-		}
-	}
 
 	initTasks(syncScript);
 
@@ -390,7 +388,7 @@ export function activate(extensionContext: ExtensionContext) {
 									Window.showTextDocument(document, { viewColumn: ViewColumn.Beside, preview: true, preserveFocus: true });
 								});
 							}
-							resolve();
+							resolve(null);
 						}).catch((error) => {
 							Window.showWarningMessage(`Could not query server: ${error}`);
 							reject();
@@ -417,6 +415,10 @@ export function activate(extensionContext: ExtensionContext) {
 		}
 	});
 	context.subscriptions.push(command);
+
+	command = commands.registerCommand('existdb.addWorkspaceFolder', addWorkspaceFolder);
+	context.subscriptions.push(command);
+
 }
 
 function deploy(xar: any) {
@@ -447,6 +449,40 @@ function deploy(xar: any) {
 			arguments: [xar]
 		});
 	});
+}
+
+class ServerPickItem implements QuickPickItem {
+	label: string;
+	description?: string;
+	detail?: string;
+	picked?: boolean;
+	alwaysShow?: boolean;
+	config: any
+}
+
+function addWorkspaceFolder() {
+	let workspaceFolders = Workspace.workspaceFolders;
+	if (!Array.isArray(workspaceFolders) || workspaceFolders.length == 0) {
+		return;
+	}
+	const servers:ServerPickItem[] = [];
+	workspaceFolders.forEach((folder) => {
+		const config = getServerConfig(folder);
+		Object.keys(config.servers).forEach((name) => {
+			const server = config.servers[name];
+			servers.push({
+				label: name,
+				description: server.server,
+				config: server
+			});
+		});
+	});
+	Window.showQuickPick(servers, { canPickMany: false, placeHolder: 'Select a server' })
+		.then((item) => {
+			const uri = `xmldb:/db?base=${item.config.server}/apps/atom-editor&user=${item.config.user}&pass=${item.config.password}`;
+			console.log(`Adding workspace folder for ${uri}`);
+			Workspace.updateWorkspaceFolders(0, 0, { uri: Uri.parse(uri), name: item.label });
+		});
 }
 
 function initTasks(syncScript: string) {
