@@ -20,6 +20,8 @@
         "vscode": "^1.63.0"
     },
     "dependencies": {
+        "axios": "^0.21.1",
+        "mime": "^2.4.7",
         "vscode-languageclient": "^7.0.0"
     },
     "devDependencies": {

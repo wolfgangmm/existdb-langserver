@@ -64,6 +64,11 @@
                 "command": "existdb.deploy",
                 "title": "Deploy package to the database",
                 "category": "eXist-db"
+            },
+            {
+                "command": "existdb.addWorkspaceFolder",
+                "title": "Add database root as workspace folder",
+                "category": "eXist-db"
             }
         ],
         "menus": {
