@@ -52,10 +52,22 @@ The ~servers~ object maps one or more server ids to the corresponding settings. 
 
 The extension includes a task provider, which automatically registers a sync task for a workspace if the `.existdb.json` configuration defines sync settings. Any change will be immediately uploaded to the corresponding target collection in the database. This means you can work on the files in the file system as you would usually do.
 
-The task must be started manually:
+To prevent unintentional syncs, the task *must* be started manually.
+
+### Start via status bar icon
+
+If a workspace configuration was found, you should find two statusbar icons to the bottom right of the window: 
+
+![Statusbar screenshot](resources/statusbar.png)
+
+The first indicates if the database connection is active, the other shows the sync status. It should display 'off' as initial state. Click on the icon to activate sync. This will list all sync tasks available in the current workspace. Select one to start.
+
+### Start via `Run Task`
 
 1. select `Terminal` / `Run Task` from the Visual Studio Code menu
 2. find a task named `existdb-sync-name-of-your-workspace` and select it
+
+### Sync configuration
 
 The configuration for the sync feature should be provided in an additional sync property:
 
