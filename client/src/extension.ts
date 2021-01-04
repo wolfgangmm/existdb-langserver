@@ -390,7 +390,7 @@ export function activate(extensionContext: ExtensionContext) {
 									Window.showTextDocument(document, { viewColumn: ViewColumn.Beside, preview: true, preserveFocus: true });
 								});
 							}
-							resolve();
+							resolve(null);
 						}).catch((error) => {
 							Window.showWarningMessage(`Could not query server: ${error}`);
 							reject();

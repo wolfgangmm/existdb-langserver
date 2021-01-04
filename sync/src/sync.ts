@@ -66,21 +66,26 @@ function remove(config: any, relPath: string) {
 
 function query(config: any, query: string) {
 	const url = config.server + "/apps/atom-editor/run?q=" + encodeURIComponent(query);
-	Axios.request({
-		url: url,
-		method: "GET",
-		auth: {
-			username: config.user,
-			password: config.password || ""
-		},
-		responseType: 'json'
-	}).then((response) => {
-		if (!(response.status == 200 || response.status == 201)) {
-			console.log('Query failed');
-			response.data.pipe(process.stderr);
-		}
-	}).catch((error) => {
-		console.error(chalk`Query failed: {red ${error.code}}`);
+	return new Promise((resolve, reject) => {
+		Axios.request({
+			url: url,
+			method: "GET",
+			auth: {
+				username: config.user,
+				password: config.password || ""
+			},
+			responseType: 'json'
+		}).then((response) => {
+			if (!(response.status == 200 || response.status == 201)) {
+				console.log('Query failed');
+				response.data.pipe(process.stderr);
+				reject(false);
+			}
+			resolve(response.data);
+		}).catch((error) => {
+			console.error(chalk`Query failed: {red ${error.response.status}}`);
+			reject(false);
+		});
 	});
 }
 
@@ -89,6 +94,33 @@ function createCollection(config: any, relPath: string) {
 	query(config, `fold-left(tokenize("${relPath}", "/"), "${config.collection}", function($parent, $component) {
         xmldb:create-collection($parent, $component)
     })`);
+}
+
+function watch(argv, dir, ignored) {
+	console.log(chalk`Watching {green ${dir}}`);
+	const watcher = chokidar.watch(dir, {
+		ignored: ignored,
+		ignoreInitial: true,
+		awaitWriteFinish: true
+	});
+	if (watcher.options.useFsEvents) {
+		console.log(chalk`{dim Using fs events.}`);
+	}
+	watcher.on('change', file => {
+		store(argv, file, path.relative(dir, file));
+	});
+	watcher.on('add', file => {
+		store(argv, file, path.relative(dir, file), true);
+	});
+	watcher.on('unlink', file => {
+		remove(argv, path.relative(dir, file));
+	});
+	watcher.on('unlinkDir', file => {
+		remove(argv, path.relative(dir, file));
+	});
+	watcher.on('addDir', added => {
+		createCollection(argv, path.relative(dir, added));
+	});
 }
 
 const argv = yargs.options({
@@ -114,31 +146,14 @@ if (!stats.isDirectory()) {
 	process.exit(1);
 }
 
-console.log(chalk`Watching {green ${dir}}`);
 const ignored = argv.i.map(p => {
 	return path.join(dir, p);
 });
 
-const watcher = chokidar.watch(dir, {
-	ignored: ignored,
-	ignoreInitial: true,
-	awaitWriteFinish: true
-});
-if (watcher.options.useFsEvents) {
-	console.log(chalk`{dim Using fs events.}`);
-}
-watcher.on('change', file => {
-	store(argv, file, path.relative(dir, file));
-});
-watcher.on('add', file => {
-	store(argv, file, path.relative(dir, file), true);
-});
-watcher.on('unlink', file => {
-	remove(argv, path.relative(dir, file));
-});
-watcher.on('unlinkDir', file => {
-	remove(argv, path.relative(dir, file));
-});
-watcher.on('addDir', added => {
-	createCollection(argv, path.relative(dir, added));
-});
+query(argv, 'system:get-version()')
+	.then(() => {
+		watch(argv, dir, ignored);
+	})
+	.catch(() => {
+		console.error(chalk`{red Communication with the server failed}. Either it is not running or the helper package was not installed. Giving up.`);
+	});

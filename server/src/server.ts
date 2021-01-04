@@ -212,7 +212,7 @@ async function deployXar(args: any[] | undefined) {
 					reject();
 				} else {
 					connection.window.showInformationMessage('XAR installed.');
-					resolve();
+					resolve(null);
 				}
 			},
 			(error) => {
