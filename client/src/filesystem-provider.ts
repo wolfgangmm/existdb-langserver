@@ -24,7 +24,7 @@ export class eXistFS implements vscode.FileSystemProvider {
 	}
 
 	watch(uri: vscode.Uri, options: { recursive: boolean; excludes: string[]; }): vscode.Disposable {
-		throw new Error('Method not implemented.');
+		return new vscode.Disposable(() => {});
 	}
 
 	stat(uri: vscode.Uri): vscode.FileStat | Thenable<vscode.FileStat> {
