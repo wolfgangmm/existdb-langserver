@@ -131,7 +131,7 @@ function startClient(folder?: WorkspaceFolder) {
 		};
 		let clientOptions: LanguageClientOptions = {
 			documentSelector: [
-				{ scheme: 'file', language: 'xquery', pattern: `${folder.uri.fsPath}/**/*` }
+				{ scheme: folder.uri.scheme, language: 'xquery', pattern: `${folder.uri.fsPath}/**/*` }
 			],
 			diagnosticCollectionName: 'existdb',
 			workspaceFolder: folder,
@@ -204,7 +204,9 @@ export function activate(extensionContext: ExtensionContext) {
 
 	initTasks(syncScript);
 
-	Workspace.workspaceFolders.forEach(folder => startClient(folder));
+	if (Workspace.workspaceFolders) {
+		Workspace.workspaceFolders.forEach(folder => startClient(folder));
+	}
 
 	// Workspace.onDidOpenTextDocument(didOpenTextDocument);
 	// Workspace.textDocuments.forEach(didOpenTextDocument);
@@ -459,21 +461,36 @@ class ServerPickItem implements QuickPickItem {
 
 function addWorkspaceFolder() {
 	let workspaceFolders = Workspace.workspaceFolders;
-	if (!Array.isArray(workspaceFolders) || workspaceFolders.length == 0) {
-		return;
-	}
 	const servers:ServerPickItem[] = [];
-	workspaceFolders.forEach((folder) => {
-		const config = getServerConfig(folder);
-		Object.keys(config.servers).forEach((name) => {
-			const server = config.servers[name];
+	if (!Array.isArray(workspaceFolders) || workspaceFolders.length == 0) {
+		const config = Workspace.getConfiguration("existdb");
+		if (config) {
 			servers.push({
-				label: name,
-				description: server.server,
-				config: server
+				label: 'eXist (default)',
+				description: 'Default server',
+				config: {
+					server: config.get('uri'),
+					user: config.get('user'),
+					password: config.get('password')
+				}
+			});
+		}
+	} else {
+		workspaceFolders.forEach((folder) => {
+			const config = getServerConfig(folder);
+			Object.keys(config.servers).forEach((name) => {
+				const server = config.servers[name];
+				servers.push({
+					label: name,
+					description: server.server,
+					config: server
+				});
 			});
 		});
-	});
+	}
+	if (servers.length === 0) {
+		return;
+	}
 	Window.showQuickPick(servers, { canPickMany: false, placeHolder: 'Select a server' })
 		.then((item) => {
 			const uri = `xmldb:/db?base=${item.config.server}/apps/atom-editor&user=${item.config.user}&pass=${item.config.password}`;
