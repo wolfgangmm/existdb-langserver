@@ -131,22 +131,22 @@ const argv = yargs.options({
 	i: { alias: 'ignore', type: 'string', array: true, default: [] }
 }).argv;
 
-if (argv._.length == 0) {
+if (argv['_'].length == 0) {
 	console.log('please specify a directory to watch');
 	process.exit(1);
 }
-const dir = path.resolve(argv._[0]);
+const dir = path.resolve(argv['_'][0]);
 if (!fs.existsSync(dir)) {
-	console.log(`directory ${argv._[0]} not found`);
+	console.log(`directory ${argv['_'][0]} not found`);
 	process.exit(1);
 }
 const stats = fs.statSync(dir);
 if (!stats.isDirectory()) {
-	console.log(`${argv._[0]} is not a directory`);
+	console.log(`${argv['_'][0]} is not a directory`);
 	process.exit(1);
 }
 
-const ignored = argv.i.map(p => {
+const ignored = argv['i'].map(p => {
 	return path.join(dir, p);
 });
 

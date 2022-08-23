@@ -60,17 +60,21 @@ export class ExistTaskProvider implements TaskProvider {
 			}
 			const user = sync.user || server.user;
 			const password = sync.password || server.password;
+			let dir = folder.uri.fsPath;
+			if (sync.dir) {
+				dir = path.join(folder.uri.fsPath, sync.dir);
+			}
 			const kind: ExistTaskDefinition = {
 				type: 'existdb-sync',
 				server: server.server,
 				user: user,
 				password: password,
 				root: collection,
-				dir: folder.uri.fsPath,
+				dir,
 				ignore: sync.ignore
 			};
 			let command = `node ${this.syncScript} -s ${server.server} -u ${user} -p ${password}  `;
-			command += `-c ${collection} "${folder.uri.fsPath}" -i ${sync.ignore.map(p => `"${p}"`).join(' ')}`;
+			command += `-c ${collection} "${dir}" -i ${sync.ignore.map(p => `"${p}"`).join(' ')}`;
 			const task = new Task(kind, TaskScope.Workspace, `sync-${folder.name}`, 'existdb', new ShellExecution(command));
 			result.push(task);
 		}
