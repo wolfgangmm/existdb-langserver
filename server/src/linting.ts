@@ -46,7 +46,7 @@ function serverLint(text: String, settings: ServerSettings, relPath: string, doc
 					const error = parseErrorMessage(json.error);
 					const diagnostic: Diagnostic = {
 						severity: DiagnosticSeverity.Error,
-						range: Range.create(error.line, error.column, error.line, Number.MAX_VALUE),
+						range: Range.create(error.line, error.column, error.line, error.column),
 						message: error.msg,
 						source: 'xquery'
 					};
@@ -85,7 +85,7 @@ function xqlint(uri: String, text: String, document: AnalyzedDocument): Diagnost
 		fileName: uri
 	});
 	document.ast = xqlint.getAST();
-	const warnings = xqlint.getWarnings();
+	const warnings:any[] = xqlint.getWarnings();
 	const diagnostics: Diagnostic[] = [];
 	warnings.forEach(warning => {
 		const diagnostic: Diagnostic = {

@@ -232,7 +232,7 @@ export class AnalyzedDocument {
 			request(this.getOptions(params, settings), (error, response, body) => {
 				if (error || response.statusCode !== 200) {
 					this.status(false, settings);
-					resolve(new ResponseError(ErrorCodes.RequestCancelled, error));
+					resolve(new ResponseError(ErrorCodes.InvalidRequest, error));
 				} else {
 					this.status(true, settings);
 					const json = JSON.parse(body);

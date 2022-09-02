@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { WorkspaceFolder } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
+import { log } from "./server";
 
 // require('request-debug')(request);
 
@@ -85,6 +86,7 @@ export function checkServer(workspaceConfig: ServerSettings, resourcesDir: strin
 		return Promise.reject('Internal error: xar file missing');
 	}
 
+	log(`Found helper xar ${xar.version}: ${xar.path}`);
 	const xquery = `
 		xquery version "3.0";
 

@@ -5,11 +5,12 @@
  */
 import {
 	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, Position,
-	TextDocument, DidChangeConfigurationNotification, TextDocumentPositionParams, CompletionItem,
+	DidChangeConfigurationNotification, TextDocumentPositionParams, CompletionItem,
 	WorkspaceFolder, ResponseError, DocumentSymbolParams,
 	SymbolInformation, Hover,
 	Location, ConfigurationItem
-} from 'vscode-languageserver';
+} from 'vscode-languageserver/node';
+import { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from 'vscode-uri';
 import { ServerSettings } from './settings';
 import { AnalyzedDocument } from './analyzed-document';
@@ -30,7 +31,7 @@ let documentSettings: Map<string, Thenable<ServerSettings>> = new Map();
 let connection = createConnection(ProposedFeatures.all);
 
 // Create a manager for open text documents
-let documents = new TextDocuments();
+let documents:TextDocuments<TextDocument> = new TextDocuments(TextDocument);
 let analyzedDocuments: Map<string, AnalyzedDocument> = new Map();
 
 const noWorkspace = 'no workspace';
@@ -63,7 +64,7 @@ function getRelativePath(uri: string) {
 	return relPath;
 }
 
-function log(message: string, prio: string = 'log') {
+export function log(message: string, prio: string = 'log') {
 	switch (prio) {
 		case 'warn':
 			connection.console.warn(`[${workspaceName}] ${message}`);
@@ -168,6 +169,7 @@ async function checkServerConnection() {
 		reportStatus('Connecting ...', settings);
 		checkServer(settings, resourcesDir).then(response => {
 			if (response) {
+				log(`Sending existdb/install notification ${response.xar.path}`);
 				connection.sendNotification('existdb/install', [response.message, response.xar]);
 			}
 			if (workspaceName !== noWorkspace) {
@@ -203,7 +205,7 @@ async function deployXar(args: any[] | undefined) {
 	}
 	const [xar] = args;
 	const settings = await getSettings();
-	log(`Installing server-side XAR on ${settings.uri}`);
+	log(`Installing server-side XAR ${xar.path} on ${settings.uri}`);
 	return new Promise((resolve, reject) => {
 		installXar(settings, xar).then(
 			(success) => {

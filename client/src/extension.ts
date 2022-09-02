@@ -10,10 +10,7 @@ import {
 	WorkspaceFolder, Uri, Disposable, tasks, commands, StatusBarAlignment, ViewColumn, ProgressLocation,
 	Task, TaskExecution, QuickPickItem
 } from 'vscode';
-
-import {
-	LanguageClient, LanguageClientOptions, TransportKind, RevealOutputChannelOn, Command, GenericNotificationHandler
-} from 'vscode-languageclient';	
+import { LanguageClient, LanguageClientOptions, TransportKind, GenericNotificationHandler, RevealOutputChannelOn } from "vscode-languageclient/node";
 import QueryResultsProvider from './query-results-provider';
 
 class TaskPickItem implements QuickPickItem {
@@ -67,8 +64,8 @@ function getOuterMostWorkspaceFolder(folder: WorkspaceFolder): WorkspaceFolder {
 
 let taskProvider: Disposable | undefined;
 
-function onXarInstallRequest(client: LanguageClient, message: string, xar): void {
-	Window.showWarningMessage(message, 'Install').then((action) => {
+function onXarInstallRequest(client: LanguageClient, message: string, xar: string): void {
+	Window.showWarningMessage(message.toString(), 'Install').then((action) => {
 		if (action) {
 			Window.withProgress({
 				location: ProgressLocation.Notification,
@@ -107,8 +104,8 @@ function startClient(folder?: WorkspaceFolder) {
 		};
 		defaultClient = new LanguageClient('existdb-langserver', 'eXist Language Server', serverOptions, clientOptions);
 		defaultClient.onReady().then(() => {
-			defaultClient.onNotification('existdb/install', (message: string, xar) => {
-				onXarInstallRequest(defaultClient, message, xar);
+			defaultClient.onNotification('existdb/install', (params) => {
+				onXarInstallRequest(defaultClient, params[0], params[1]);
 			});
 			defaultClient.onNotification('existdb/status', onStatus);
 		});
@@ -143,8 +140,8 @@ function startClient(folder?: WorkspaceFolder) {
 		};
 		let client = new LanguageClient('existdb-langserver', 'eXist Language Server', serverOptions, clientOptions);
 		client.onReady().then(() => {
-			client.onNotification('existdb/install', (message: string, xar) => {
-				onXarInstallRequest(client, message, xar);
+			client.onNotification('existdb/install', (params) => {
+				onXarInstallRequest(client, params[0], params[1]);
 			});
 			client.onNotification('existdb/status', onStatus);
 		});
@@ -165,9 +162,9 @@ export function activate(extensionContext: ExtensionContext) {
 
 	const statusbar = Window.createStatusBarItem(StatusBarAlignment.Right, 100);
 
-	onStatus = function(status: string, uri: string) {
-		statusbar.text = `${status}`;
-		statusbar.tooltip = `eXist-db: ${uri}`;
+	onStatus = function(args: string[]) {
+		statusbar.text = `${args[0]}`;
+		statusbar.tooltip = `eXist-db: ${args[1]}`;
 		statusbar.show();
 	}
 
