@@ -1,6 +1,6 @@
 {
     "name": "existdb-vscode",
-    "version": "1.5.4",
+    "version": "1.6.0",
     "description": "Language server and client for eXist and XQuery",
     "categories": [
         "Programming Languages",
