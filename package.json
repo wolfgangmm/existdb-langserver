@@ -33,7 +33,8 @@
         "vscode": "^1.63.0"
     },
     "activationEvents": [
-        "workspaceContains:expath-pkg.xml",
+        "workspaceContains:**/.existdb.json",
+        "workspaceContains:**/expath-pkg.xml",
         "onLanguage:xquery"
     ],
     "main": "./client/dist/extension",
