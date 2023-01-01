@@ -48,6 +48,8 @@ The ~servers~ object maps one or more server ids to the corresponding settings. 
 | password | Password of the user                                             | empty                   |
 | root     | the root collection corresponding to the workspace on the server | "/db"                   |
 
+The extension requires a helper package to be installed on the eXist instance. As soon as you open a file which activates the extension, it will automatically check if the helper package is present. If not, a popup should appear, asking if the helper package should be installed.
+
 ## Syncing Directories to the Server
 
 The extension includes a task provider, which automatically registers a sync task for a workspace if the `.existdb.json` configuration defines sync settings. Any change will be immediately uploaded to the corresponding target collection in the database. This means you can work on the files in the file system as you would usually do.
@@ -83,6 +85,8 @@ The configuration for the sync feature should be provided in an additional sync 
     },
     "sync": {
         "server": "localhost",
+        "dir": ".",
+        "polling": false,
         "ignore": [
             ".existdb.json",
             ".git/**",
@@ -97,6 +101,8 @@ The configuration for the sync feature should be provided in an additional sync 
 | -------- | --------------------------------------------------------------------- |
 | server   | the name of the server entry (in the 'servers'  section to connect to |
 | ignore   | an array of file path patterns which should not be synced             |
+| dir      | subdirectory to be watched (default: '.')                             |
+| polling  | by default, the watcher uses file system events to detect changes. This may fail in certain environments. If the option is enable, the watcher will instead periodically poll files for changes. |
 
 ## Executing XQueries
 
@@ -108,19 +114,13 @@ An open XQuery file can be sent to the server for evaluation, using either
 
 The result returned by eXist is displayed in a new column besides the currently open editor. If the XQuery defines serialization to HTML, the results will be shown in a web view. In all other cases, the source code of the result is displayed.
 
-## Configuration
-
-The [server side support package](https://github.com/eXist-db/atom-editor-support) for the Atom editor - `atom-editor` needs to be deployed on the server. The extension  will try to detect if the package is already installed - if not it will ask if it should install it automatically.
-
-The parameters required for the communication with the server can either be configured via the extension settings, or via a `.existdb.json` file in the root directory of a workspace. The configuration syntax of this file is the same as for the [Atom plugin](https://github.com/eXist-db/atom-existdb).
-
-## Run
+## Building the Extension
 
 * clone the repository and open the directory in Visual Studio Code
 * run `npm install`
 * switch to the debug panel in the sidebar and choose *Launch Client* from the run configurations
 
-## Packaging
+### Packaging
 
 Install `vsce` once by running
 

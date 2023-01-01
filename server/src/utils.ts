@@ -26,7 +26,8 @@ const DEFAULT_CONFIG = {
 			'bower_components/**',
 			'package*.json',
 			'.vscode/**'
-		]
+		],
+		polling: false
 	}
 };
 

@@ -73,9 +73,19 @@ export class ExistTaskProvider implements TaskProvider {
 				dir,
 				ignore: sync.ignore
 			};
-			let command = `node ${this.syncScript} -s ${server.server} -u ${user} -p ${password}  `;
-			command += `-c ${collection} "${dir}" -i ${sync.ignore.map(p => `"${p}"`).join(' ')}`;
-			const task = new Task(kind, TaskScope.Workspace, `sync-${folder.name}`, 'existdb', new ShellExecution(command));
+			const args = ['node', this.syncScript,
+				'-s', server.server,
+				'-u', user,
+				'-p', password,
+				'-c', collection,
+				'-i', sync.ignore.map(p => `"${p}"`).join(' ')
+			];
+			if (sync.polling) {
+				args.push('--poll');
+			}
+			args.push(`"${dir}"`);
+
+			const task = new Task(kind, TaskScope.Workspace, `sync-${folder.name}`, 'existdb', new ShellExecution(args.join(' ')));
 			result.push(task);
 		}
 		return result;

@@ -16,7 +16,7 @@ function store(config: any, file: string, relPath: string, add: boolean = false)
 	const contentType = mime.getType(path.extname(file));
 	const {size} = fs.statSync(file);
 
-	console.log(chalk`Uploading {blue ${relPath}} as {magenta ${contentType}}...`);
+	console.log(`Uploading ${chalk.blue(relPath)} as ${chalk.magenta(contentType)}...`);
 
 	Axios.request({
 		url: url,
@@ -33,20 +33,20 @@ function store(config: any, file: string, relPath: string, add: boolean = false)
 		responseType: 'json'
 	}).then((response) => {
 		if (!(response.status == 200 || response.status == 201) || response.data.status === 'error') {
-			console.log(chalk`Upload of {red ${relPath}} failed: ${response.data.message}`);
+			console.log(`Upload of ${chalk.red(relPath)} failed: ${chalk.red(response.data.message)}`);
 			return;
 		}
 		if (contentType === "application/xquery" && add) {
 			query(config, "sm:chmod(xs:anyURI('" + config.collection + "/" + relPath + "'), 'rwxr-xr-x')");
 		}
 	}).catch((error) => {
-		console.log(chalk`Upload of {red ${relPath}} failed: {red ${error.code}}`);
+		console.log(`Upload of ${chalk.red(relPath)} failed: ${chalk.red(error.code)}`);
 	});
 }
 
 function remove(config: any, relPath: string) {
 	const url = config.server + "/apps/atom-editor/delete" + config.collection + "/" + relPath;
-	console.log(chalk`Deleting {blue ${relPath}} ...`);
+	console.log(`Deleting ${chalk.blue(relPath)} ...`);
 	Axios.request({
 		url: url,
 		method: "GET",
@@ -56,20 +56,23 @@ function remove(config: any, relPath: string) {
 		}
 	}).then((response) => {
 		if (!(response.status == 200 || response.status == 201)) {
-			console.error(chalk`Failed to delete {red ${relPath}}`);
+			console.error(`Failed to delete ${chalk.red(relPath)}`);
 			response.data.pipe(process.stderr);
 		}
 	}).catch((error) => {
-		console.error(chalk`Failed to delete {red ${relPath}}: {red ${error.code}}`);
+		console.error(`Failed to delete ${chalk.red(relPath)}: ${chalk.red(error.code)}`);
 	});
 }
 
 function query(config: any, query: string) {
-	const url = config.server + "/apps/atom-editor/run?q=" + encodeURIComponent(query);
+	const url = `${config.server}/apps/atom-editor/run`;
 	return new Promise((resolve, reject) => {
 		Axios.request({
 			url: url,
 			method: "GET",
+			params: {
+				q: query
+			},
 			auth: {
 				username: config.user,
 				password: config.password || ""
@@ -83,28 +86,33 @@ function query(config: any, query: string) {
 			}
 			resolve(response.data);
 		}).catch((error) => {
-			console.error(chalk`Query failed: {red ${error.response.status}}`);
+			console.error(`Query failed: ${chalk.red(error)}`);
 			reject(false);
 		});
 	});
 }
 
 function createCollection(config: any, relPath: string) {
-	console.log(chalk`Creating collection {blue ${relPath}} in {magenta ${config.collection}}`);
+	console.log(`Creating collection ${chalk.blue(relPath)} in ${chalk.magenta(config.collection)}`);
 	query(config, `fold-left(tokenize("${relPath}", "/"), "${config.collection}", function($parent, $component) {
         xmldb:create-collection($parent, $component)
     })`);
 }
 
 function watch(argv, dir, ignored) {
-	console.log(chalk`Watching {green ${dir}}`);
-	const watcher = chokidar.watch(dir, {
+	console.log(`Watching ${chalk.green(dir)}`);
+	const options:chokidar.WatchOptions = {
 		ignored: ignored,
 		ignoreInitial: true,
 		awaitWriteFinish: true
-	});
+	};
+	if (argv.poll) {
+		options.usePolling = true;
+		console.log(chalk.dim('Using polling.'));
+	}
+	const watcher = chokidar.watch(dir, options);
 	if (watcher.options.useFsEvents) {
-		console.log(chalk`{dim Using fs events.}`);
+		console.log(chalk.dim('Using fs events.'));
 	}
 	watcher.on('change', file => {
 		store(argv, file, path.relative(dir, file));
@@ -121,6 +129,9 @@ function watch(argv, dir, ignored) {
 	watcher.on('addDir', added => {
 		createCollection(argv, path.relative(dir, added));
 	});
+	watcher.on('error', error => {
+		console.log('ERROR: %s', chalk.red(error));
+	});
 }
 
 const argv = yargs.options({
@@ -128,7 +139,8 @@ const argv = yargs.options({
 	u: { alias: 'user', type: 'string', default: 'admin' },
 	p: { alias: 'password', type: 'string', default: '' },
 	c: { alias: 'collection', type: 'string', demandOption: true },
-	i: { alias: 'ignore', type: 'string', array: true, default: [] }
+	i: { alias: 'ignore', type: 'string', array: true, default: [] },
+	poll: { type: 'boolean', default: false, description: 'watcher should use polling' }
 }).argv;
 
 if (argv['_'].length == 0) {
@@ -155,5 +167,5 @@ query(argv, 'system:get-version()')
 		watch(argv, dir, ignored);
 	})
 	.catch(() => {
-		console.error(chalk`{red Communication with the server failed}. Either it is not running or the helper package was not installed. Giving up.`);
+		console.error(`${chalk.red('Communication with the server failed')}. Either it is not running or the helper package was not installed. Giving up.`);
 	});
