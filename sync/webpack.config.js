@@ -34,7 +34,10 @@ const config = {
 		new webpack.BannerPlugin({ banner: '#!/usr/bin/env node', raw: true }),
 		new CopyPlugin({
 			patterns: [
-			{ from: 'node_modules/fsevents', to: 'node_modules/fsevents' }
+			{ 
+				from: 'node_modules/fsevents', to: 'node_modules/fsevents',
+				noErrorOnMissing: true
+			}
 		]})
 	],
 	module: {
