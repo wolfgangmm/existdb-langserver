@@ -77,13 +77,14 @@ export class ExistTaskProvider implements TaskProvider {
 				'-s', server.server,
 				'-u', user,
 				'-p', password,
-				'-c', collection,
-				'-i', sync.ignore.map(p => `"${p}"`).join(' ')
+				'-c', collection
 			];
 			if (sync.polling) {
 				args.push('--poll');
 			}
 			args.push(`"${dir}"`);
+			args.push('-i');
+			args.push(sync.ignore.map(p => `"${p}"`).join(' '));
 
 			const task = new Task(kind, TaskScope.Workspace, `sync-${folder.name}`, 'existdb', new ShellExecution(args.join(' ')));
 			result.push(task);
