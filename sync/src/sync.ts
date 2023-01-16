@@ -104,10 +104,13 @@ function watch(argv, dir, ignored) {
 	const options:chokidar.WatchOptions = {
 		ignored: ignored,
 		ignoreInitial: true,
-		awaitWriteFinish: true
+		awaitWriteFinish: true,
 	};
 	if (argv.poll) {
 		options.usePolling = true;
+		if (argv.interval) {
+			options.interval = argv.interval;
+		}
 		console.log(chalk.dim('Using polling.'));
 	}
 	const watcher = chokidar.watch(dir, options);
@@ -140,7 +143,8 @@ const argv = yargs.options({
 	p: { alias: 'password', type: 'string', default: '' },
 	c: { alias: 'collection', type: 'string', demandOption: true },
 	i: { alias: 'ignore', type: 'string', array: true, default: [] },
-	poll: { type: 'boolean', default: false, description: 'watcher should use polling' }
+	poll: { type: 'boolean', default: false, description: 'watcher should use polling' },
+	interval: { type: 'number', description: 'polling interval'}
 }).argv;
 
 if (argv['_'].length == 0) {

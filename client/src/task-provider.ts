@@ -81,6 +81,10 @@ export class ExistTaskProvider implements TaskProvider {
 			];
 			if (sync.polling) {
 				args.push('--poll');
+				if (sync.interval) {
+					args.push('--interval');
+					args.push(sync.interval);
+				}
 			}
 			args.push(`"${dir}"`);
 			args.push('-i');

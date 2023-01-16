@@ -87,6 +87,7 @@ The configuration for the sync feature should be provided in an additional sync 
         "server": "localhost",
         "dir": ".",
         "polling": false,
+        "interval": 100,
         "ignore": [
             ".existdb.json",
             ".git/**",
@@ -103,6 +104,7 @@ The configuration for the sync feature should be provided in an additional sync 
 | ignore   | an array of file path patterns which should not be synced             |
 | dir      | subdirectory to be watched (default: '.')                             |
 | polling  | by default, the watcher uses file system events to detect changes. This may fail in certain environments. If the option is enable, the watcher will instead periodically poll files for changes. |
+| interval | interval (in ms) to use when polling |
 
 ## Executing XQueries
 

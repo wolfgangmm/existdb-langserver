@@ -27,7 +27,8 @@ const DEFAULT_CONFIG = {
 			'package*.json',
 			'.vscode/**'
 		],
-		polling: false
+		polling: false,
+		interval: 100
 	}
 };
 
