@@ -6,6 +6,7 @@ import * as mime from 'mime';
 import chalk from 'chalk';
 import Axios from 'axios';
 
+// (DP): see https://github.com/broofa/mime#mimedefinetype-map--force--false
 mime.define({
 	'application/xquery': ['xq', 'xql', 'xqm', 'xquery'],
 	'application/xml': ['odd']
