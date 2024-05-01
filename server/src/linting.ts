@@ -44,13 +44,18 @@ function serverLint(text: String, settings: ServerSettings, relPath: string, doc
 				const json = JSON.parse(body);
 				if (json.result !== 'pass') {
 					const error = parseErrorMessage(json.error);
-					const diagnostic: Diagnostic = {
-						severity: DiagnosticSeverity.Error,
-						range: Range.create(error.line, error.column, error.line, error.column),
-						message: error.msg,
-						source: 'xquery'
-					};
-					document.diagnostics.push(diagnostic);
+					if (!error.line) {
+						document.status(false, settings);
+						resolve(document);
+					} else {
+						const diagnostic: Diagnostic = {
+							severity: DiagnosticSeverity.Error,
+							range: Range.create(error.line, error.column, error.line, error.column),
+							message: error.msg,
+							source: 'xquery'
+						};
+						document.diagnostics.push(diagnostic);
+					}
 				}
 			}
 			resolve(document);
