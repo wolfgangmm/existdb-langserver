@@ -493,9 +493,10 @@ function addWorkspaceFolder() {
 	}
 	Window.showQuickPick(servers, { canPickMany: false, placeHolder: 'Select a server' })
 		.then((item) => {
-			const uri = `xmldb:/db?base=${item.config.server}/apps/atom-editor&user=${item.config.user}&pass=${item.config.password}`;
+			const uri = `xmldb:/db?base=${encodeURIComponent(item.config.server)}/apps/atom-editor&user=${encodeURIComponent(item.config.user)}&pass=${encodeURIComponent(item.config.password)}`;
 			console.log(`Adding workspace folder for ${uri}`);
-			Workspace.updateWorkspaceFolders(0, 0, { uri: Uri.parse(uri), name: item.label });
+			const uriParsed = Uri.parse(uri);
+			Workspace.updateWorkspaceFolders(0, 0, { uri: uriParsed, name: item.label });
 		});
 }
 

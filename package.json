@@ -35,7 +35,8 @@
     "activationEvents": [
         "workspaceContains:**/.existdb.json",
         "workspaceContains:**/expath-pkg.xml",
-        "onLanguage:xquery"
+        "onLanguage:xquery",
+        "onFileSystem:xmldb"
     ],
     "main": "./client/dist/extension",
     "contributes": {
