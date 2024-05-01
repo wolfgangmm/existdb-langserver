@@ -147,6 +147,10 @@ function startClient(folder?: WorkspaceFolder) {
 		});
 		client.start();
 		clients.set(folder.uri.toString(), client);
+
+		if (!defaultClient) {
+			defaultClient = client;
+		}
 		return client;
 	}
 	return clients.get(folder.uri.toString());
