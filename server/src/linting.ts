@@ -14,7 +14,11 @@ export function lintDocument(text: string, relPath: string, document: AnalyzedDo
 	if (text.length == 0) {
 		return Promise.resolve(document);
 	}
-	xqlint(document.uri, text, document);
+	try {
+		xqlint(document.uri, text, document);
+	} catch (e) {
+		// ignore
+	}
 	return serverLint(text, settings, relPath, document);
 
 }
