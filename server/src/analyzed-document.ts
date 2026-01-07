@@ -1,12 +1,10 @@
 import { Diagnostic, CompletionItem, CompletionItemKind, InsertTextFormat, ResponseError, ErrorCodes, SymbolInformation, TextDocument, Range, Position, Hover, MarkupKind, Location } from 'vscode-languageserver';
 import { ServerSettings } from './settings';
 import { AST } from './ast';
-import * as request from 'request';
+import axios from 'axios';
 import * as path from 'path';
 import * as fs from 'fs';
 import { URI } from 'vscode-uri';
-
-// require('request-debug')(request);
 
 const funcDefRe = /(?:\(:~(.*?):\))?\s*declare\s+((?:%[\w\:\-]+(?:\([^\)]*\))?\s*)*function\s+([^\(]+)\()/gsm;
 const trimRe = /^[\x09\x0a\x0b\x0c\x0d\x20\xa0\u1680\u180e\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000]+|[\x09\x0a\x0b\x0c\x0d\x20\xa0\u1680\u180e\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000]+$/g;
@@ -99,49 +97,67 @@ export class AnalyzedDocument {
 
 	private async gotoDefinitionRemote(signature: any, relPath: string, textDocument: TextDocument, settings: ServerSettings): Promise<Location | null> {
 		const params = this.getParameters(signature, relPath, settings);
-		return new Promise(resolve => {
-			request(this.getOptions(params, settings), (error, response, body) => {
-				if (error || response.statusCode !== 200) {
-					this.status(false, settings);
-					resolve(null);
-				} else {
-					const json = JSON.parse(body);
-					if (json.length == 0) {
-						this.logger(`no description found for ${params.signature}`, 'info');
-					} else {
-						this.status(true, settings);
-						const desc = json[0];
-						const rp = path.relative(`${settings.path}/${relPath}`, desc.path);
-						const fp = URI.parse(this.uri).fsPath;
-						const absPath = path.resolve(path.dirname(fp), rp);
-						console.log(`reading ${absPath}`);
-						fs.readFile(absPath, { encoding: 'UTF-8' }, (err, content) => {
-							if (error || !content) {
-								this.logger(`failed to parse ${absPath}`, 'error');
-								resolve(null);
-								return;
-							}
-							const symbol = AnalyzedDocument.getLocalSymbol(content, signature.name, signature.arity);
-							if (symbol && symbol.location) {
-								resolve({
-									uri: URI.file(absPath).toString(),
-									range: {
-										start: {
-											line: symbol.location.start,
-											character: 0
-										},
-										end: {
-											line: symbol.location.end + 1,
-											character: Number.MAX_VALUE
-										}
-									}
-								});
+		try {
+			const options = this.getOptions(params, settings);
+			const response = await axios.get(options.uri, {
+				auth: {
+					username: settings.user,
+					password: settings.password
+				},
+				params: options.qs,
+				responseType: 'text'
+			});
+			
+			if (response.status !== 200) {
+				this.status(false, settings);
+				return null;
+			}
+			
+			const json = JSON.parse(response.data);
+			if (json.length == 0) {
+				this.logger(`no description found for ${params.signature}`, 'info');
+				return null;
+			}
+			
+			this.status(true, settings);
+			const desc = json[0];
+			const rp = path.relative(`${settings.path}/${relPath}`, desc.path);
+			const fp = URI.parse(this.uri).fsPath;
+			const absPath = path.resolve(path.dirname(fp), rp);
+			console.log(`reading ${absPath}`);
+			
+			return new Promise((resolve) => {
+				fs.readFile(absPath, { encoding: 'utf-8' }, (err: NodeJS.ErrnoException | null, content: string | Buffer) => {
+					if (err || !content) {
+						this.logger(`failed to parse ${absPath}`, 'error');
+						resolve(null);
+						return;
+					}
+					const contentStr = typeof content === 'string' ? content : content.toString('utf-8');
+					const symbol = AnalyzedDocument.getLocalSymbol(contentStr, signature.name, signature.arity);
+					if (symbol && symbol.location) {
+						resolve({
+							uri: URI.file(absPath).toString(),
+							range: {
+								start: {
+									line: symbol.location.start,
+									character: 0
+								},
+								end: {
+									line: symbol.location.end + 1,
+									character: Number.MAX_VALUE
+								}
 							}
 						});
+					} else {
+						resolve(null);
 					}
-				}
+				});
 			});
-		});
+		} catch (error) {
+			this.status(false, settings);
+			return null;
+		}
 	}
 
 	async getHover(position: Position, relPath: string, settings: ServerSettings): Promise<Hover | null> {
@@ -171,37 +187,49 @@ export class AnalyzedDocument {
 
 	private async getHoverRemote(signature: any, relPath: string, settings: ServerSettings): Promise<Hover | null> {
 		const params = this.getParameters(signature, relPath, settings);
-		return new Promise(resolve => {
-			request(this.getOptions(params, settings), (error, response, body) => {
-				if (error || response.statusCode !== 200) {
-					this.status(false, settings);
-					resolve(null);
-				} else {
-					this.status(true, settings);
-					const json = JSON.parse(body);
-					if (json.length == 0) {
-						this.logger(`hover: no description found for ${params.signature}`, 'info');
-					} else {
-						const desc = json[0];
-						const md = [`**${desc.text}** as **${desc.leftLabel}**`];
-						if (desc.description) {
-							md.push(desc.description);
-						}
-						if (desc.arguments && desc.arguments.length > 0) {
-							desc.arguments.forEach((arg: any) => {
-								md.push(`**\$${arg.name}** *${arg.type}* ${arg.description}`);
-							});
-						}
-						resolve({
-							contents: {
-								kind: MarkupKind.Markdown,
-								value: md.join('\n\n')
-							}
-						});
-					}
-				}
+		try {
+			const options = this.getOptions(params, settings);
+			const response = await axios.get(options.uri, {
+				auth: {
+					username: settings.user,
+					password: settings.password
+				},
+				params: options.qs,
+				responseType: 'text'
 			});
-		});
+			
+			if (response.status !== 200) {
+				this.status(false, settings);
+				return null;
+			}
+			
+			this.status(true, settings);
+			const json = JSON.parse(response.data);
+			if (json.length == 0) {
+				this.logger(`hover: no description found for ${params.signature}`, 'info');
+				return null;
+			}
+			
+			const desc = json[0];
+			const md = [`**${desc.text}** as **${desc.leftLabel}**`];
+			if (desc.description) {
+				md.push(desc.description);
+			}
+			if (desc.arguments && desc.arguments.length > 0) {
+				desc.arguments.forEach((arg: any) => {
+					md.push(`**\$${arg.name}** *${arg.type}* ${arg.description}`);
+				});
+			}
+			return {
+				contents: {
+					kind: MarkupKind.Markdown,
+					value: md.join('\n\n')
+				}
+			};
+		} catch (error) {
+			this.status(false, settings);
+			return null;
+		}
 	}
 
 	private getParameters(signature: any, relPath: string, settings: ServerSettings) {
@@ -228,29 +256,37 @@ export class AnalyzedDocument {
 		if (prefix) {
 			params.prefix = prefix;
 		}
-		return new Promise(resolve => {
-			request(this.getOptions(params, settings), (error, response, body) => {
-				if (error || response.statusCode !== 200) {
-					this.status(false, settings);
-					resolve(new ResponseError(ErrorCodes.InvalidRequest, error));
-				} else {
-					this.status(true, settings);
-					const json = JSON.parse(body);
-					const symbols: any[] = [];
-					json.forEach((item: { text: string; snippet: string; type: string; name: string; description: string; }) => {
-						const symbol: Symbol = {
-							signature: item.text,
-							type: item.type,
-							snippet: item.snippet.replace(/\:\$/g, ':\\\$'),
-							name: item.name,
-							documentation: item.description
-						};
-						symbols.push(symbol);
-						this.symbolsMap.set(symbol.name, symbol);
-					});
-					resolve(this.mapCompletions(this.localSymbols).concat(this.mapCompletions(symbols)));
-				}
+		const options = this.getOptions(params, settings);
+		return axios.get(options.uri, {
+			auth: {
+				username: settings.user,
+				password: settings.password
+			},
+			params: options.qs,
+			responseType: 'text'
+		}).then(response => {
+			if (response.status !== 200) {
+				this.status(false, settings);
+				throw new Error(`Unexpected status code: ${response.status}`);
+			}
+			this.status(true, settings);
+			const json = JSON.parse(response.data);
+			const symbols: any[] = [];
+			json.forEach((item: { text: string; snippet: string; type: string; name: string; description: string; }) => {
+				const symbol: Symbol = {
+					signature: item.text,
+					type: item.type,
+					snippet: item.snippet.replace(/\:\$/g, ':\\\$'),
+					name: item.name,
+					documentation: item.description
+				};
+				symbols.push(symbol);
+				this.symbolsMap.set(symbol.name, symbol);
 			});
+			return this.mapCompletions(this.localSymbols).concat(this.mapCompletions(symbols));
+		}).catch(error => {
+			this.status(false, settings);
+			return new ResponseError(ErrorCodes.InvalidRequest, error);
 		});
 	}
 
@@ -262,35 +298,31 @@ export class AnalyzedDocument {
 		const params = {
 			output: this.getOutputMode(query),
 			qu: query,
-			count: 100,
+			count: '100',
 			base: `${settings.path}/${relPath}`
 		};
-		const options = {
-			uri: `${settings.uri}/apps/atom-editor/execute`,
-			method: "POST",
-			form: params,
-			auth: {
-				user: settings.user,
-				password: settings.password,
-				sendImmediately: true
-			}
-		}
 		this.logger(`Execute query with output mode: ${params.output}, path: ${params.base}`);
-		return new Promise((resolve, reject) => {
-			request(options, (error, response, body) => {
-				if (!response) {
-					reject(error);
-				}
-				const resultCount = response.headers['x-result-count'];
-				const queryTime = response.headers['x-elapsed'];
-				const queryResponse = {
-					output: params.output,
-					hits: resultCount,
-					elapsed: queryTime,
-					results: body
-				};
-				resolve(queryResponse);
-			});
+		return axios.post(`${settings.uri}/apps/atom-editor/execute`, new URLSearchParams(params).toString(), {
+			auth: {
+				username: settings.user,
+				password: settings.password
+			},
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded'
+			},
+			responseType: 'text'
+		}).then(response => {
+			const resultCount = response.headers['x-result-count'];
+			const queryTime = response.headers['x-elapsed'];
+			const queryResponse = {
+				output: params.output,
+				hits: resultCount,
+				elapsed: queryTime,
+				results: response.data
+			};
+			return queryResponse;
+		}).catch(error => {
+			throw error;
 		});
 	}
 
@@ -305,14 +337,7 @@ export class AnalyzedDocument {
 	private getOptions(params: any, settings: ServerSettings, target: string = 'atom-autocomplete.xql') {
 		return {
 			uri: `${settings.uri}/apps/atom-editor/${target}`,
-			method: "GET",
-			qs: params,
-			useQuerystring: true,
-			auth: {
-				user: settings.user,
-				password: settings.password,
-				sendImmediately: true
-			}
+			qs: params
 		};
 	}
 

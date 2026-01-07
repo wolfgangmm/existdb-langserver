@@ -15,14 +15,14 @@ export class ExistTaskProvider implements TaskProvider {
 
 	private workspaceFolders: WorkspaceFolder[];
 	private syncScript: string;
-	private taskPromise: Thenable<Task[]> | undefined = undefined;
+	private taskPromise: Promise<Task[]> | undefined = undefined;
 
 	constructor(workspaceFolders: WorkspaceFolder[], syncScript: string) {
 		this.workspaceFolders = workspaceFolders;
 		this.syncScript = syncScript;
 	}
 
-	public provideTasks(): Thenable<Task[]> | undefined {
+	public provideTasks(): Promise<Task[]> | undefined {
 		if (!this.taskPromise) {
 			this.taskPromise = this.getTasks();
 		}
@@ -76,9 +76,12 @@ export class ExistTaskProvider implements TaskProvider {
 			const args = ['node', this.syncScript,
 				'-s', server.server,
 				'-u', user,
-				'-p', password,
 				'-c', collection
 			];
+			if (password && typeof password === 'string' && password.length > 0) {
+				args.push('-p');
+				args.push(password);
+			}
 			if (sync.polling) {
 				args.push('--poll');
 				if (sync.interval) {
@@ -88,7 +91,7 @@ export class ExistTaskProvider implements TaskProvider {
 			}
 			args.push(`"${dir}"`);
 			args.push('-i');
-			args.push(sync.ignore.map(p => `"${p}"`).join(' '));
+			args.push(sync.ignore.map((p: string) => `"${p}"`).join(' '));
 
 			const task = new Task(kind, TaskScope.Workspace, `sync-${folder.name}`, 'existdb', new ShellExecution(args.join(' ')));
 			result.push(task);

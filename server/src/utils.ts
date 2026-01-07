@@ -1,12 +1,11 @@
-import * as request from 'request';
+import axios from 'axios';
+import * as https from 'https';
 import { ServerSettings } from './settings';
 import * as path from 'path';
 import * as fs from 'fs';
 import { WorkspaceFolder } from 'vscode-languageserver';
 import { URI } from 'vscode-uri';
 import { log } from "./server";
-
-// require('request-debug')(request);
 
 const DEFAULT_CONFIG = {
 	servers: {
@@ -137,76 +136,76 @@ export async function installXar(settings: ServerSettings | null, xar: any): Pro
 	const fileName = path.basename(xar.path);
 	const targetPath = `/db/system/repo/${fileName}`;
 	const url = `${settings.uri}/rest${targetPath}`;
-	const options = {
-		uri: url,
-		method: "PUT",
-		strictSSL: false,
-		headers: {
-			"Content-Type": "application/octet-stream"
-		},
-		auth: {
-			user: settings.user,
-			pass: settings.password,
-			sendImmediately: true
+	
+	try {
+		const fileStream = fs.createReadStream(xar.path);
+		const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+		const response = await axios.put(url, fileStream, {
+			auth: {
+				username: settings.user,
+				password: settings.password
+			},
+			headers: {
+				"Content-Type": "application/octet-stream"
+			},
+			httpsAgent: httpsAgent,
+			maxContentLength: Infinity,
+			maxBodyLength: Infinity
+		});
+		
+		if (response.status !== 201) {
+			throw new Error(`Unexpected status code: ${response.status}`);
 		}
-	};
-	return new Promise((resolve, reject) => {
-		fs.createReadStream(xar.path).pipe(
-			request(
-				options,
-				function (error, response) {
-					if (error || response.statusCode !== 201) {
-						reject(error);
-					}
-					const xquery = `
-						xquery version "3.1";
+		
+		const xquery = `
+			xquery version "3.1";
 
-						declare namespace expath="http://expath.org/ns/pkg";
-						declare namespace output="http://www.w3.org/2010/xslt-xquery-serialization";
-						declare option output:method "json";
-						declare option output:media-type "application/json";
+			declare namespace expath="http://expath.org/ns/pkg";
+			declare namespace output="http://www.w3.org/2010/xslt-xquery-serialization";
+			declare option output:method "json";
+			declare option output:media-type "application/json";
 
-						declare variable $repo := "http://demo.exist-db.org/exist/apps/public-repo/modules/find.xql";
+			declare variable $repo := "http://demo.exist-db.org/exist/apps/public-repo/modules/find.xql";
 
-						declare function local:remove($package-url as xs:string) as xs:boolean {
-							if ($package-url = repo:list()) then
-								let $undeploy := repo:undeploy($package-url)
-								let $remove := repo:remove($package-url)
-								return
-									$remove
-							else
-								false()
-						};
+			declare function local:remove($package-url as xs:string) as xs:boolean {
+				if ($package-url = repo:list()) then
+					let $undeploy := repo:undeploy($package-url)
+					let $remove := repo:remove($package-url)
+					return
+						$remove
+				else
+					false()
+			};
 
-						let $xarPath := "${targetPath}"
-						let $meta :=
-							try {
-								compression:unzip(
-									util:binary-doc($xarPath),
-									function($path as xs:anyURI, $type as xs:string,
-										$param as item()*) as xs:boolean {
-										$path = "expath-pkg.xml"
-									},
-									(),
-									function($path as xs:anyURI, $type as xs:string, $data as item()?,
-										$param as item()*) {
-										$data
-									}, ()
-								)
-							} catch * {
-								error(xs:QName("local:xar-unpack-error"), "Failed to unpack archive")
-							}
-						let $package := $meta//expath:package/string(@name)
-						let $removed := local:remove($package)
-						let $installed := repo:install-and-deploy-from-db($xarPath, $repo)
-						return
-							repo:get-root()
-					`;
-					query(settings, xquery).then(resolve, reject);
+			let $xarPath := "${targetPath}"
+			let $meta :=
+				try {
+					compression:unzip(
+						util:binary-doc($xarPath),
+						function($path as xs:anyURI, $type as xs:string,
+							$param as item()*) as xs:boolean {
+							$path = "expath-pkg.xml"
+						},
+						(),
+						function($path as xs:anyURI, $type as xs:string, $data as item()?,
+							$param as item()*) {
+							$data
+						}, ()
+					)
+				} catch * {
+					error(xs:QName("local:xar-unpack-error"), "Failed to unpack archive")
 				}
-			)
-		);
-	});
+			let $package := $meta//expath:package/string(@name)
+			let $removed := local:remove($package)
+			let $installed := repo:install-and-deploy-from-db($xarPath, $repo)
+			return
+				repo:get-root()
+		`;
+		await query(settings, xquery);
+		return true;
+	} catch (error) {
+		throw error;
+	}
 }
 
 function query(workspaceConfig: ServerSettings | null, query: string): Promise<any> {
@@ -214,27 +213,20 @@ function query(workspaceConfig: ServerSettings | null, query: string): Promise<a
 		return Promise.reject();
 	}
 	const url = `${workspaceConfig.uri}/rest/db?_query=${encodeURIComponent(query)}&_wrap=no`;
-	const options = {
-		uri: url,
-		method: "GET",
-		json: true,
+	return axios.get(url, {
 		auth: {
-			user: workspaceConfig.user,
-			pass: workspaceConfig.password,
-			sendImmediately: true
+			username: workspaceConfig.user,
+			password: workspaceConfig.password
+		},
+		responseType: 'json'
+	}).then(response => {
+		if (response.status === 200 || response.status === 201) {
+			return response.data;
+		} else {
+			throw new Error(`Unexpected status code: ${response.status}`);
 		}
-	};
-	return new Promise((resolve, reject) => {
-		request(
-			options,
-			function (error, response, body) {
-				if (error || !(response.statusCode == 200 || response.statusCode == 201)) {
-					reject(error);
-				} else {
-					resolve(body);
-				}
-			}
-		);
+	}).catch(error => {
+		throw error;
 	});
 }
 

@@ -25,7 +25,7 @@ const defaultSettings: ServerSettings = {
 };
 
 // Cache the settings of all open documents
-let documentSettings: Map<string, Thenable<ServerSettings>> = new Map();
+let documentSettings: Map<string, Promise<ServerSettings>> = new Map();
 
 // Creates the LSP connection
 let connection = createConnection(ProposedFeatures.all);
@@ -95,7 +95,7 @@ documents.onDidClose(e => {
 	analyzedDocuments.delete(e.document.uri);
 });
 
-function getSettings(): Thenable<ServerSettings> {
+function getSettings(): Promise<ServerSettings> {
 	if (workspaceConfig) {
 		return Promise.resolve(workspaceConfig);
 	}

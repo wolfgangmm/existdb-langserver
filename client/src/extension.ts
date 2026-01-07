@@ -14,15 +14,15 @@ import { LanguageClient, LanguageClientOptions, TransportKind, GenericNotificati
 import QueryResultsProvider from './query-results-provider';
 
 class TaskPickItem implements QuickPickItem {
-	label: string;
+	label: string = '';
 	task?: Task;
 	execution?: TaskExecution;
 }
 
 const BINARIES_DIR = 'dist';
 
-let context: ExtensionContext;
-let onStatus : GenericNotificationHandler;
+let context: ExtensionContext | undefined;
+let onStatus : GenericNotificationHandler | undefined;
 
 let defaultClient: LanguageClient;
 let clients: Map<string, LanguageClient> = new Map();
@@ -82,6 +82,9 @@ function onXarInstallRequest(client: LanguageClient, message: string, xar: strin
 }
 
 function startClient(folder?: WorkspaceFolder) {
+	if (!context) {
+		throw new Error('Extension context not initialized');
+	}
 	let module = context.asAbsolutePath(path.join('server', BINARIES_DIR, 'server.js'));
 	if (!folder) {
 		if (defaultClient) {
@@ -103,13 +106,14 @@ function startClient(folder?: WorkspaceFolder) {
 			}
 		};
 		defaultClient = new LanguageClient('existdb-langserver', 'eXist Language Server', serverOptions, clientOptions);
-		defaultClient.onReady().then(() => {
+		defaultClient.start().then(() => {
 			defaultClient.onNotification('existdb/install', (params) => {
 				onXarInstallRequest(defaultClient, params[0], params[1]);
 			});
-			defaultClient.onNotification('existdb/status', onStatus);
+			if (onStatus) {
+				defaultClient.onNotification('existdb/status', onStatus);
+			}
 		});
-		defaultClient.start();
 		return defaultClient;
 	}
 	// If we have nested workspace folders we only start a server on the outer most workspace folder.
@@ -139,13 +143,14 @@ function startClient(folder?: WorkspaceFolder) {
 			}
 		};
 		let client = new LanguageClient('existdb-langserver', 'eXist Language Server', serverOptions, clientOptions);
-		client.onReady().then(() => {
+		client.start().then(() => {
 			client.onNotification('existdb/install', (params) => {
 				onXarInstallRequest(client, params[0], params[1]);
 			});
-			client.onNotification('existdb/status', onStatus);
+			if (onStatus) {
+				client.onNotification('existdb/status', onStatus);
+			}
 		});
-		client.start();
 		clients.set(folder.uri.toString(), client);
 
 		if (!defaultClient) {
@@ -179,7 +184,7 @@ export function activate(extensionContext: ExtensionContext) {
 	taskStatusbar.show();
 
 	function checkSyncTasks() {
-		const running = [];
+		const running: string[] = [];
 		tasks.taskExecutions.forEach((exec) => {
 			if (exec.task.name && exec.task.name.startsWith('sync-')) {
 				running.push(exec.task.name.substring(5));
@@ -210,7 +215,9 @@ export function activate(extensionContext: ExtensionContext) {
 
 	initTasks(syncScript);
 
-	Workspace.workspaceFolders.forEach(folder => startClient(folder));
+	if (Workspace.workspaceFolders) {
+		Workspace.workspaceFolders.forEach(folder => startClient(folder));
+	}
 
 	// Workspace.onDidOpenTextDocument(didOpenTextDocument);
 	// Workspace.textDocuments.forEach(didOpenTextDocument);
@@ -262,10 +269,12 @@ export function activate(extensionContext: ExtensionContext) {
 					arguments: [uri]
 				});
 				if (result) {
-					result.then((path: string) => {
-						Workspace.openTextDocument(Uri.file(path)).then(doc => {
-							Window.showTextDocument(doc);
-						});
+					result.then((path: unknown) => {
+						if (typeof path === 'string') {
+							Workspace.openTextDocument(Uri.file(path)).then(doc => {
+								Window.showTextDocument(doc);
+							});
+						}
 					});
 				}
 			}
@@ -277,6 +286,9 @@ export function activate(extensionContext: ExtensionContext) {
 		let picks: TaskPickItem[] = [];
 		tasks.fetchTasks().then((t) => {
 			t.forEach((task) => {
+				if (!Workspace.workspaceFolders) {
+					return;
+				}
 				Workspace.workspaceFolders.forEach((folder) => {
 					const name = `sync-${folder.name}`;
 					if (task.name === name) {
@@ -300,10 +312,12 @@ export function activate(extensionContext: ExtensionContext) {
 			});
 			Window.showQuickPick(picks, { placeHolder: 'root directory', canPickMany: false })
 				.then((pick) => {
-					if (pick.execution) {
-						pick.execution.terminate();
-					} else if (pick.task) {
-						tasks.executeTask(pick.task);
+					if (pick) {
+						if (pick.execution) {
+							pick.execution.terminate();
+						} else if (pick.task) {
+							tasks.executeTask(pick.task);
+						}
 					}
 				});
 		});
@@ -339,29 +353,35 @@ export function activate(extensionContext: ExtensionContext) {
 						}
 					}
 					if (result) {
-						result.then((result) => {
-							let content = result.results;
-							if (result.hits) {
-								let message = `Query returned ${result.hits} in ${result.elapsed}ms.`;
-								if (result.hits > 100) {
+						result.then((queryResult: any) => {
+							if (!queryResult || typeof queryResult !== 'object') {
+								reject();
+								return;
+							}
+							let content: string = queryResult.results || '';
+							if (queryResult.hits) {
+								const hits = typeof queryResult.hits === 'string' ? parseInt(queryResult.hits) : queryResult.hits;
+								const elapsed = queryResult.elapsed || '0';
+								let message = `Query returned ${hits} in ${elapsed}ms.`;
+								if (hits > 100) {
 									message += ' Showing first 100 results.';
 								}
-								switch (result.output) {
+								switch (queryResult.output) {
 									case 'xml':
 									case 'html':
 									case 'html5':
-										content = `<!-- ${message} -->\n${result.results}`;
+										content = `<!-- ${message} -->\n${queryResult.results || ''}`;
 										break;
 									case 'json':
-										content = result.results;
+										content = queryResult.results || '';
 										break;
 									default:
-										content = `(:  ${message} :)\n${result.results}`;
+										content = `(:  ${message} :)\n${queryResult.results || ''}`;
 										break;
 								}
 							}
-							if (result.output === 'html' || result.output === 'html5' ||
-								result.output === 'xhtml') {
+							if (queryResult.output === 'html' || queryResult.output === 'html5' ||
+								queryResult.output === 'xhtml') {
 								const panel = Window.createWebviewPanel(
 									'existdb-query',
 									'eXistdb Query Result',
@@ -370,8 +390,8 @@ export function activate(extensionContext: ExtensionContext) {
 
 								panel.webview.html = content;
 							} else {
-								let lang;
-								switch (result.output) {
+								let lang: string;
+								switch (queryResult.output) {
 									case 'adaptive':
 										lang = 'xquery';
 										break;
@@ -421,7 +441,7 @@ export function activate(extensionContext: ExtensionContext) {
 }
 
 function deploy(xar: any) {
-	let client;
+	let client: LanguageClient | undefined;
 	const editor = Window.activeTextEditor;
 	if (editor) {
 		const uri = editor.document.uri;
@@ -438,11 +458,17 @@ function deploy(xar: any) {
 			client = startClient();
 		}
 	}
+	if (!client) {
+		return;
+	}
 	Window.withProgress({
 		location: ProgressLocation.Notification,
 		title: `Installing xar ${xar.path}`,
 		cancellable: false
 	}, (progress) => {
+		if (!client) {
+			return Promise.resolve();
+		}
 		return client.sendRequest('workspace/executeCommand', {
 			command: 'deploy',
 			arguments: [xar]
@@ -458,18 +484,16 @@ function initTasks(syncScript: string) {
 	taskProvider = tasks.registerTaskProvider('existdb-sync', new ExistTaskProvider(workspaceFolders, syncScript));
 }
 
-export function deactivate(): Thenable<void> {
+export function deactivate(): Promise<void> {
 	if (taskProvider) {
 		taskProvider.dispose();
 	}
-	let promises: Thenable<void>[] = [];
+	let promises: Promise<void>[] = [];
 	if (defaultClient) {
 		promises.push(defaultClient.stop());
 	}
 	for (let client of clients.values()) {
 		promises.push(client.stop());
 	}
-	context = undefined;
-	onStatus = undefined;
 	return Promise.all(promises).then(() => undefined);
 }

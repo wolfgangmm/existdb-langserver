@@ -1,4 +1,4 @@
-import * as yargs from 'yargs';
+import { Command } from 'commander';
 import * as chokidar from 'chokidar';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -11,7 +11,7 @@ mime.define({
 	'application/xml': ['odd']
 });
 
-function store(config: any, file: string, relPath: string, add: boolean = false) {
+function store(config: SyncConfig, file: string, relPath: string, add: boolean = false) {
 	const url = config.server + "/apps/atom-editor/store" + config.collection + "/" + relPath;
 	const contentType = mime.getType(path.extname(file));
 	const {size} = fs.statSync(file);
@@ -44,7 +44,7 @@ function store(config: any, file: string, relPath: string, add: boolean = false)
 	});
 }
 
-function remove(config: any, relPath: string) {
+function remove(config: SyncConfig, relPath: string) {
 	const url = config.server + "/apps/atom-editor/delete" + config.collection + "/" + relPath;
 	console.log(`Deleting ${chalk.blue(relPath)} ...`);
 	Axios.request({
@@ -64,7 +64,7 @@ function remove(config: any, relPath: string) {
 	});
 }
 
-function query(config: any, query: string) {
+function query(config: SyncConfig, query: string) {
 	const url = `${config.server}/apps/atom-editor/run`;
 	return new Promise((resolve, reject) => {
 		Axios.request({
@@ -92,24 +92,24 @@ function query(config: any, query: string) {
 	});
 }
 
-function createCollection(config: any, relPath: string) {
+function createCollection(config: SyncConfig, relPath: string) {
 	console.log(`Creating collection ${chalk.blue(relPath)} in ${chalk.magenta(config.collection)}`);
 	query(config, `fold-left(tokenize("${relPath}", "/"), "${config.collection}", function($parent, $component) {
         xmldb:create-collection($parent, $component)
     })`);
 }
 
-function watch(argv, dir, ignored) {
+function watch(config: SyncConfig, dir: string, ignored: string[]) {
 	console.log(`Watching ${chalk.green(dir)}`);
 	const options:chokidar.WatchOptions = {
 		ignored: ignored,
 		ignoreInitial: true,
 		awaitWriteFinish: true,
 	};
-	if (argv.poll) {
+	if (config.poll) {
 		options.usePolling = true;
-		if (argv.interval) {
-			options.interval = argv.interval;
+		if (config.interval) {
+			options.interval = config.interval;
 		}
 		console.log(chalk.dim('Using polling.'));
 	}
@@ -118,57 +118,86 @@ function watch(argv, dir, ignored) {
 		console.log(chalk.dim('Using fs events.'));
 	}
 	watcher.on('change', file => {
-		store(argv, file, path.relative(dir, file));
+		store(config, file, path.relative(dir, file));
 	});
 	watcher.on('add', file => {
-		store(argv, file, path.relative(dir, file), true);
+		store(config, file, path.relative(dir, file), true);
 	});
 	watcher.on('unlink', file => {
-		remove(argv, path.relative(dir, file));
+		remove(config, path.relative(dir, file));
 	});
 	watcher.on('unlinkDir', file => {
-		remove(argv, path.relative(dir, file));
+		remove(config, path.relative(dir, file));
 	});
 	watcher.on('addDir', added => {
-		createCollection(argv, path.relative(dir, added));
+		createCollection(config, path.relative(dir, added));
 	});
 	watcher.on('error', error => {
 		console.log('ERROR: %s', chalk.red(error));
 	});
 }
 
-const argv = yargs.options({
-	s: { alias: 'server', type: 'string', default: 'http://localhost:8080/exist' },
-	u: { alias: 'user', type: 'string', default: 'admin' },
-	p: { alias: 'password', type: 'string', default: '' },
-	c: { alias: 'collection', type: 'string', demandOption: true },
-	i: { alias: 'ignore', type: 'string', array: true, default: [] },
-	poll: { type: 'boolean', default: false, description: 'watcher should use polling' },
-	interval: { type: 'number', description: 'polling interval'}
-}).argv;
+interface SyncConfig {
+	server: string;
+	user: string;
+	password: string;
+	collection: string;
+	ignore: string[];
+	poll: boolean;
+	interval?: number;
+}
 
-if (argv['_'].length == 0) {
+const program = new Command();
+
+program
+	.name('existdb-sync')
+	.description('File watcher to automatically keep a directory in sync with the corresponding collection in eXist-db')
+	.option('-s, --server <url>', 'server URL', 'http://localhost:8080/exist')
+	.option('-u, --user <user>', 'user name', 'admin')
+	.option('-p, --password <password>', 'password', '')
+	.requiredOption('-c, --collection <collection>', 'target collection')
+	.option('-i, --ignore <patterns...>', 'ignore patterns', [])
+	.option('--poll', 'use polling instead of file system events', false)
+	.option('--interval <ms>', 'polling interval in milliseconds')
+	.argument('<directory>', 'directory to watch')
+	.parse(process.argv);
+
+const options = program.opts();
+const args = program.args;
+
+if (args.length === 0) {
 	console.log('please specify a directory to watch');
 	process.exit(1);
 }
-const dir = path.resolve(argv['_'][0]);
+
+const dir = path.resolve(args[0]);
 if (!fs.existsSync(dir)) {
-	console.log(`directory ${argv['_'][0]} not found`);
+	console.log(`directory ${args[0]} not found`);
 	process.exit(1);
 }
 const stats = fs.statSync(dir);
 if (!stats.isDirectory()) {
-	console.log(`${argv['_'][0]} is not a directory`);
+	console.log(`${args[0]} is not a directory`);
 	process.exit(1);
 }
 
-const ignored = argv['i'].map(p => {
+const config: SyncConfig = {
+	server: options.server,
+	user: options.user,
+	password: options.password,
+	collection: options.collection,
+	ignore: options.ignore || [],
+	poll: options.poll || false,
+	interval: options.interval ? parseInt(options.interval, 10) : undefined
+};
+
+const ignored = config.ignore.map((p: string) => {
 	return path.join(dir, p);
 });
 
-query(argv, 'system:get-version()')
+query(config, 'system:get-version()')
 	.then(() => {
-		watch(argv, dir, ignored);
+		watch(config, dir, ignored);
 	})
 	.catch(() => {
 		console.error(`${chalk.red('Communication with the server failed')}. Either it is not running or the helper package was not installed. Giving up.`);

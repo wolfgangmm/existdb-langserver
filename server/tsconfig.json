@@ -1,13 +1,16 @@
 {
 	"compilerOptions": {
-		"target": "es2020",
-		"lib": ["es2020"],
+		"target": "ES2022",
+		"lib": ["ES2022"],
 		"module": "commonjs",
 		"moduleResolution": "node",
 		"sourceMap": true,
 		"strict": true,
 		"outDir": "dist",
-		"rootDir": "src"
+		"rootDir": "src",
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true
 	},
 	"include": [
 		"src"

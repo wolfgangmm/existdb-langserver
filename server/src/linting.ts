@@ -7,7 +7,7 @@ import { Diagnostic, DiagnosticSeverity, Range, ResponseError, ErrorCodes } from
 import { XQLint } from 'xqlint';
 import { ServerSettings } from './settings';
 import { AnalyzedDocument } from './analyzed-document';
-import * as request from 'request';
+import axios from 'axios';
 
 export function lintDocument(text: string, relPath: string, document: AnalyzedDocument, settings: ServerSettings): Promise<AnalyzedDocument | ResponseError<any>> {
 	document.diagnostics = [];
@@ -24,46 +24,42 @@ export function lintDocument(text: string, relPath: string, document: AnalyzedDo
 }
 
 function serverLint(text: String, settings: ServerSettings, relPath: string, document: AnalyzedDocument): Promise<AnalyzedDocument | ResponseError<any>> {
-	return new Promise(resolve => {
-		const options = {
-			uri: `${settings.uri}/apps/atom-editor/compile.xql`,
-			method: "PUT",
-			body: text,
-			headers: {
-				"X-BasePath": `${settings.path}/${relPath}`,
-				"Content-Type": "application/octet-stream"
-			},
-			auth: {
-				user: settings.user,
-				password: settings.password,
-				sendImmediately: true
-			}
-		};
-		request(options, (error, response, body) => {
-			if (error || response.statusCode !== 200) {
+	return axios.put(`${settings.uri}/apps/atom-editor/compile.xql`, text, {
+		auth: {
+			username: settings.user,
+			password: settings.password
+		},
+		headers: {
+			"X-BasePath": `${settings.path}/${relPath}`,
+			"Content-Type": "application/octet-stream"
+		},
+		responseType: 'text'
+	}).then(response => {
+		if (response.status !== 200) {
+			document.status(false, settings);
+			return document;
+		}
+		document.status(true, settings);
+		const json = JSON.parse(response.data);
+		if (json.result !== 'pass') {
+			const error = parseErrorMessage(json.error);
+			if (!error.line) {
 				document.status(false, settings);
-				resolve(document);
+				return document;
 			} else {
-				document.status(true, settings);
-				const json = JSON.parse(body);
-				if (json.result !== 'pass') {
-					const error = parseErrorMessage(json.error);
-					if (!error.line) {
-						document.status(false, settings);
-						resolve(document);
-					} else {
-						const diagnostic: Diagnostic = {
-							severity: DiagnosticSeverity.Error,
-							range: Range.create(error.line, error.column, error.line, error.column),
-							message: error.msg,
-							source: 'xquery'
-						};
-						document.diagnostics.push(diagnostic);
-					}
-				}
+				const diagnostic: Diagnostic = {
+					severity: DiagnosticSeverity.Error,
+					range: Range.create(error.line, error.column, error.line, error.column),
+					message: error.msg,
+					source: 'xquery'
+				};
+				document.diagnostics.push(diagnostic);
 			}
-			resolve(document);
-		});
+		}
+		return document;
+	}).catch(error => {
+		document.status(false, settings);
+		return document;
 	});
 }
 
