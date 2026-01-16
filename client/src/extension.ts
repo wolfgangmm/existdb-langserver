@@ -5,6 +5,7 @@
  */
 import { ExistTaskProvider } from './task-provider';
 import * as path from 'path';
+import * as fs from 'fs';
 import {
 	workspace as Workspace, window as Window, languages as Languages, ExtensionContext, TextDocument, OutputChannel,
 	WorkspaceFolder, Uri, Disposable, tasks, commands, StatusBarAlignment, ViewColumn, ProgressLocation,
@@ -60,6 +61,31 @@ function getOuterMostWorkspaceFolder(folder: WorkspaceFolder): WorkspaceFolder {
 		}
 	}
 	return folder;
+}
+
+async function folderContainsFile(folder: WorkspaceFolder, filename: string): Promise<boolean> {
+	const filePath = path.join(folder.uri.fsPath, filename);
+	try {
+		await fs.promises.access(filePath, fs.constants.F_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function shouldActivateForFolder(folder: WorkspaceFolder): Promise<boolean> {
+	return (await folderContainsFile(folder, '.existdb.json')) || (await folderContainsFile(folder, 'expath-pkg.xml'));
+}
+
+function watchForActivationFile(pattern: string, context: ExtensionContext): void {
+	const watcher = Workspace.createFileSystemWatcher(pattern);
+	watcher.onDidCreate(async (uri) => {
+		const folder = Workspace.getWorkspaceFolder(uri);
+		if (folder && !clients.has(folder.uri.toString())) {
+			startClient(folder);
+		}
+	});
+	context.subscriptions.push(watcher);
 }
 
 let taskProvider: Disposable | undefined;
@@ -215,13 +241,22 @@ export function activate(extensionContext: ExtensionContext) {
 
 	initTasks(syncScript);
 
+	// Start clients for folders that contain .existdb.json or expath-pkg.xml
 	if (Workspace.workspaceFolders) {
-		Workspace.workspaceFolders.forEach(folder => startClient(folder));
+		Promise.all(Workspace.workspaceFolders.map(async (folder) => {
+			if (await shouldActivateForFolder(folder)) {
+				startClient(folder);
+			}
+		}));
 	}
+
+	// Watch for activation files being created
+	watchForActivationFile('**/.existdb.json', context);
+	watchForActivationFile('**/expath-pkg.xml', context);
 
 	// Workspace.onDidOpenTextDocument(didOpenTextDocument);
 	// Workspace.textDocuments.forEach(didOpenTextDocument);
-	Workspace.onDidChangeWorkspaceFolders((event) => {
+	Workspace.onDidChangeWorkspaceFolders(async (event) => {
 		for (let folder of event.removed) {
 			let client = clients.get(folder.uri.toString());
 			if (client) {
@@ -229,7 +264,12 @@ export function activate(extensionContext: ExtensionContext) {
 				client.stop();
 			}
 		}
-		event.added.forEach(folder => startClient(folder));
+		// Only start clients for folders that contain .existdb.json or expath-pkg.xml
+		for (let folder of event.added) {
+			if (await shouldActivateForFolder(folder)) {
+				startClient(folder);
+			}
+		}
 	});
 
 	let command = commands.registerCommand('existdb.reconnect', () => {
