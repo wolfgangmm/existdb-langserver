@@ -150,7 +150,7 @@ connection.onInitialize((params) => {
 		capabilities: {
 			textDocumentSync: {
 				openClose: true,
-				change: TextDocumentSyncKind.Full
+				change: TextDocumentSyncKind.Incremental
 			},
 			completionProvider: {
 				resolveProvider: true
