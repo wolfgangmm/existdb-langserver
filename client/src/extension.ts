@@ -77,6 +77,8 @@ async function shouldActivateForFolder(folder: WorkspaceFolder): Promise<boolean
 	return (await folderContainsFile(folder, '.existdb.json')) || (await folderContainsFile(folder, 'expath-pkg.xml'));
 }
 
+let updateTaskStatusbarVisibilityFn: (() => Promise<void>) | undefined;
+
 function watchForActivationFile(pattern: string, context: ExtensionContext): void {
 	const watcher = Workspace.createFileSystemWatcher(pattern);
 	watcher.onDidCreate(async (uri) => {
@@ -84,11 +86,31 @@ function watchForActivationFile(pattern: string, context: ExtensionContext): voi
 		if (folder && !clients.has(folder.uri.toString())) {
 			startClient(folder);
 		}
+		// Refresh tasks and status bar when .existdb.json is created
+		if (pattern.includes('.existdb.json') && updateTaskStatusbarVisibilityFn) {
+			refreshTasks();
+			await updateTaskStatusbarVisibilityFn();
+		}
+	});
+	watcher.onDidChange(async (uri) => {
+		// Refresh tasks and status bar when .existdb.json is changed
+		if (pattern.includes('.existdb.json') && updateTaskStatusbarVisibilityFn) {
+			refreshTasks();
+			await updateTaskStatusbarVisibilityFn();
+		}
+	});
+	watcher.onDidDelete(async (uri) => {
+		// Update status bar when .existdb.json is deleted
+		if (pattern.includes('.existdb.json') && updateTaskStatusbarVisibilityFn) {
+			refreshTasks();
+			await updateTaskStatusbarVisibilityFn();
+		}
 	});
 	context.subscriptions.push(watcher);
 }
 
 let taskProvider: Disposable | undefined;
+let existTaskProvider: ExistTaskProvider | undefined;
 
 function onXarInstallRequest(client: LanguageClient, message: string, xar: string): void {
 	Window.showWarningMessage(message.toString(), 'Install').then((action) => {
@@ -195,7 +217,7 @@ export function activate(extensionContext: ExtensionContext) {
 	const registration = Workspace.registerTextDocumentContentProvider("xmldb-query", resultsProvider);
 	context.subscriptions.push(registration);
 
-	const statusbar = Window.createStatusBarItem(StatusBarAlignment.Right, 100);
+	const statusbar = Window.createStatusBarItem(StatusBarAlignment.Right, 1);
 
 	onStatus = function(args: string[]) {
 		statusbar.text = `${args[0]}`;
@@ -203,11 +225,30 @@ export function activate(extensionContext: ExtensionContext) {
 		statusbar.show();
 	}
 
-	const taskStatusbar = Window.createStatusBarItem(StatusBarAlignment.Right, 100);
+	const taskStatusbar = Window.createStatusBarItem(StatusBarAlignment.Right, 2);
 	taskStatusbar.text = "$(sync-ignored) off";
 	taskStatusbar.tooltip = "eXist-db: click to configure automatic synchronization";
 	taskStatusbar.command = "existdb.control-sync";
-	taskStatusbar.show();
+
+	async function updateTaskStatusbarVisibility() {
+		if (!Workspace.workspaceFolders || Workspace.workspaceFolders.length === 0) {
+			taskStatusbar.hide();
+			return;
+		}
+		let hasConfig = false;
+		for (const folder of Workspace.workspaceFolders) {
+			if (await folderContainsFile(folder, '.existdb.json')) {
+				hasConfig = true;
+				break;
+			}
+		}
+		if (hasConfig) {
+			taskStatusbar.show();
+		} else {
+			taskStatusbar.hide();
+		}
+	}
+	updateTaskStatusbarVisibilityFn = updateTaskStatusbarVisibility;
 
 	function checkSyncTasks() {
 		const running: string[] = [];
@@ -250,6 +291,9 @@ export function activate(extensionContext: ExtensionContext) {
 		}));
 	}
 
+	// Update status bar visibility based on .existdb.json presence
+	updateTaskStatusbarVisibility();
+
 	// Watch for activation files being created
 	watchForActivationFile('**/.existdb.json', context);
 	watchForActivationFile('**/expath-pkg.xml', context);
@@ -270,6 +314,9 @@ export function activate(extensionContext: ExtensionContext) {
 				startClient(folder);
 			}
 		}
+		// Refresh tasks and update status bar when workspace folders change
+		refreshTasks();
+		updateTaskStatusbarVisibility();
 	});
 
 	let command = commands.registerCommand('existdb.reconnect', () => {
@@ -521,7 +568,17 @@ function initTasks(syncScript: string) {
 	if (!Array.isArray(workspaceFolders) || workspaceFolders.length == 0) {
 		return;
 	}
-	taskProvider = tasks.registerTaskProvider('existdb-sync', new ExistTaskProvider(workspaceFolders, syncScript));
+	existTaskProvider = new ExistTaskProvider(workspaceFolders, syncScript);
+	taskProvider = tasks.registerTaskProvider('existdb-sync', existTaskProvider);
+}
+
+function refreshTasks() {
+	if (existTaskProvider && Workspace.workspaceFolders) {
+		existTaskProvider.updateWorkspaceFolders(Workspace.workspaceFolders);
+	} else if (!existTaskProvider && context) {
+		let syncScript = context.asAbsolutePath(path.join('sync', BINARIES_DIR, 'sync.js'));
+		initTasks(syncScript);
+	}
 }
 
 export function deactivate(): Promise<void> {

@@ -29,6 +29,15 @@ export class ExistTaskProvider implements TaskProvider {
 		return this.taskPromise;
 	}
 
+	public invalidateCache(): void {
+		this.taskPromise = undefined;
+	}
+
+	public updateWorkspaceFolders(workspaceFolders: readonly WorkspaceFolder[]): void {
+		this.workspaceFolders = [...workspaceFolders];
+		this.invalidateCache();
+	}
+
 	public resolveTask(_task: Task): Task | undefined {
 		return undefined;
 	}
