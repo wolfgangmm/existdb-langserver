@@ -2,32 +2,22 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"type": "npm",
-			"script": "compile",
-			"group": "build",
-			"presentation": {
-				"panel": "dedicated",
-				"reveal": "never"
+			"label": "webpack-dev",
+			"type": "shell",
+			"command": "npm",
+			"args": ["run", "webpack-dev"],
+			"options": {
+				"cwd": "${workspaceFolder}"
 			},
-			"problemMatcher": [
-				"$tsc"
-			]
-		},
-		{
-			"type": "npm",
-			"script": "watch",
-			"isBackground": true,
 			"group": {
 				"kind": "build",
 				"isDefault": true
 			},
 			"presentation": {
-				"panel": "dedicated",
-				"reveal": "never"
+				"reveal": "silent",
+				"panel": "shared"
 			},
-			"problemMatcher": [
-				"$tsc-watch"
-			]
+			"problemMatcher": "$tsc"
 		}
 	]
 }

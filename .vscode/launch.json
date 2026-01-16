@@ -1,72 +1,29 @@
 {
 	"version": "0.2.0",
-	// List of configurations. Add new configurations or edit existing ones.
 	"configurations": [
 		{
+			"name": "Launch Extension",
 			"type": "extensionHost",
 			"request": "launch",
-			"name": "Launch Client",
-			"runtimeExecutable": "${execPath}",
 			"args": [
-				"--extensionDevelopmentPath=${workspaceRoot}"
+				"--extensionDevelopmentPath=${workspaceFolder}"
 			],
-			"stopOnEntry": false,
-			"sourceMaps": true,
 			"outFiles": [
-				"${workspaceRoot}/client/dist/**/*.js"
+				"${workspaceFolder}/client/dist/**/*.js",
+				"${workspaceFolder}/server/dist/**/*.js"
 			],
-			"preLaunchTask": "npm: watch"
+			"preLaunchTask": "webpack-dev"
 		},
 		{
-			"name": "Language Server E2E Test",
-			"type": "extensionHost",
-			"request": "launch",
-			"runtimeExecutable": "${execPath}",
-			"args": [
-				"--extensionDevelopmentPath=${workspaceRoot}",
-				"--extensionTestsPath=${workspaceRoot}/client/dist/test",
-				"${workspaceRoot}/client/testFixture"
-			],
-			"stopOnEntry": false,
-			"sourceMaps": true,
-			"outFiles": [
-				"${workspaceRoot}/client/dist/test/**/*.js"
-			]
-		},
-		{
+			"name": "Attach to Extension Host",
 			"type": "node",
 			"request": "attach",
-			"name": "Attach to Server 6010",
-			"address": "localhost",
-			"protocol": "inspector",
 			"port": 6010,
+			"restart": true,
 			"sourceMaps": true,
 			"outFiles": [
-				"${workspaceRoot}/server/dist/**/*.js"
-			]
-		},
-		{
-			"type": "node",
-			"request": "attach",
-			"name": "Attach to Server 6011",
-			"address": "localhost",
-			"protocol": "inspector",
-			"port": 6011,
-			"sourceMaps": true,
-			"outFiles": [
-				"${workspaceRoot}/server/dist/**/*.js"
-			]
-		},
-		{
-			"type": "node",
-			"request": "attach",
-			"name": "Attach to Server 6012",
-			"address": "localhost",
-			"protocol": "inspector",
-			"port": 6012,
-			"sourceMaps": true,
-			"outFiles": [
-				"${workspaceRoot}/server/dist/**/*.js"
+				"${workspaceFolder}/client/dist/**/*.js",
+				"${workspaceFolder}/server/dist/**/*.js"
 			]
 		}
 	]
