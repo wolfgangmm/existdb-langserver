@@ -266,20 +266,6 @@ export function activate(extensionContext: ExtensionContext) {
 	tasks.onDidStartTask(checkSyncTasks);
 	tasks.onDidEndTask(checkSyncTasks);
 
-	function didOpenTextDocument(document: TextDocument): void {
-		// We are only interested in language mode text
-		if (document.languageId !== 'xquery' || (document.uri.scheme !== 'file' && document.uri.scheme !== 'untitled')) {
-			return;
-		}
-
-		let uri = document.uri;
-		let folder = Workspace.getWorkspaceFolder(uri);
-		// Untitled files go to a default client.
-		if (!folder || uri.scheme === 'untitled') {
-			startClient();
-		}
-	}
-
 	initTasks(syncScript);
 
 	// Start clients for folders that contain .existdb.json or expath-pkg.xml
@@ -298,8 +284,6 @@ export function activate(extensionContext: ExtensionContext) {
 	watchForActivationFile('**/.existdb.json', context);
 	watchForActivationFile('**/expath-pkg.xml', context);
 
-	// Workspace.onDidOpenTextDocument(didOpenTextDocument);
-	// Workspace.textDocuments.forEach(didOpenTextDocument);
 	Workspace.onDidChangeWorkspaceFolders(async (event) => {
 		for (let folder of event.removed) {
 			let client = clients.get(folder.uri.toString());
