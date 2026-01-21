@@ -180,7 +180,7 @@ async function checkServerConnection() {
 		(message) => {
 			log(`Connection failed: ${message}`);
 			connection.window.showWarningMessage(`Connection failed: ${message}`);
-			connection.sendNotification('existdb/status', ['$(database) Disonnected', settings.uri]);
+			connection.sendNotification('existdb/status', ['$(database) Disconnected', settings.uri]);
 		});
 	}
 }
