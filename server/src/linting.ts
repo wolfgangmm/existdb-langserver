@@ -4,10 +4,20 @@
  * @author Wolfgang Meier
  */
 import { Diagnostic, DiagnosticSeverity, Range, ResponseError, ErrorCodes } from 'vscode-languageserver';
-import { XQLint } from 'xqlint';
 import { ServerSettings } from './settings';
 import { AnalyzedDocument } from './analyzed-document';
 import axios from 'axios';
+
+// eXide's REx-generated XQuery 3.1 parser + adapter that emits an AST shape
+// compatible with what xqlint's JSONParseTreeHandler used to produce. The
+// langserver only needs local symbol lookup (used by hover / go-to-definition
+// when a server roundtrip isn't worth it); the adapter's normalized AST is
+// what server/src/ast.ts traverses.
+//
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const XQueryParser = require('./parser/XQueryParser');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const rexParserAdapter = require('./parser/adapter');
 
 export function lintDocument(text: string, relPath: string, document: AnalyzedDocument, settings: ServerSettings): Promise<AnalyzedDocument | ResponseError<any>> {
 	document.diagnostics = [];
@@ -85,26 +95,11 @@ function parseErrorMessage(error: any) {
 	return { line: Math.max(line, 0), column: Math.max(column, 0), msg: msg };
 }
 
-function xqlint(uri: String, text: String, document: AnalyzedDocument): Diagnostic[] {
-	const xqlint = new XQLint(text, {
-		fileName: uri
-	});
-	document.ast = xqlint.getAST();
-	const warnings:any[] = xqlint.getWarnings();
-	const diagnostics: Diagnostic[] = [];
-	warnings.forEach(warning => {
-		const diagnostic: Diagnostic = {
-			severity: DiagnosticSeverity.Warning,
-			range: Range.create(
-				warning.pos.sl,
-				warning.pos.sc,
-				warning.pos.el,
-				warning.pos.ec),
-			message: warning.message,
-			source: 'xquery'
-		};
-		diagnostics.push(diagnostic);
-	});
-	document.diagnostics = diagnostics;
-	return diagnostics;
+function xqlint(uri: String, text: String, document: AnalyzedDocument): void {
+	// Build an AST for local symbol lookup (hover, go-to-definition).
+	// Parse errors are intentionally ignored here — atom-editor's
+	// compile.xql handles error checking on the server. We just need a
+	// best-effort AST whenever the source is parseable.
+	const result = rexParserAdapter.parseXQuery(text, XQueryParser);
+	document.ast = result.ast;
 }
