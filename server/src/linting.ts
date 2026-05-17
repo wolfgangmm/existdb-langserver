@@ -4,10 +4,20 @@
  * @author Wolfgang Meier
  */
 import { Diagnostic, DiagnosticSeverity, Range, ResponseError, ErrorCodes } from 'vscode-languageserver';
-import { XQLint } from 'xqlint';
 import { ServerSettings } from './settings';
 import { AnalyzedDocument } from './analyzed-document';
 import axios from 'axios';
+
+// eXide's REx-generated XQuery 3.1 parser + adapter that emits an AST shape
+// compatible with what xqlint's JSONParseTreeHandler used to produce. The
+// langserver only needs local symbol lookup (used by hover / go-to-definition
+// when a server roundtrip isn't worth it); the adapter's normalized AST is
+// what server/src/ast.ts traverses.
+//
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const XQueryParser = require('./parser/XQueryParser');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const rexParserAdapter = require('./parser/adapter');
 
 export function lintDocument(text: string, relPath: string, document: AnalyzedDocument, settings: ServerSettings): Promise<AnalyzedDocument | ResponseError<any>> {
 	document.diagnostics = [];
@@ -83,11 +93,10 @@ function mapSeverity(severity: string | number): DiagnosticSeverity {
 }
 
 function xqlint(uri: String, text: String, document: AnalyzedDocument): void {
-	const xqlint = new XQLint(text, {
-		fileName: uri
-	});
-	// Keep AST for local symbol lookup (hover, go-to-definition).
-	// Skip getWarnings() — server-side lang:diagnostics handles error
-	// checking without the false positives xqlint produces (e.g. #67).
-	document.ast = xqlint.getAST();
+	// Build an AST for local symbol lookup (hover, go-to-definition).
+	// Parse errors are intentionally ignored here — server-side
+	// lang:diagnostics handles error checking. We just need a best-effort
+	// AST whenever the source is parseable.
+	const result = rexParserAdapter.parseXQuery(text, XQueryParser);
+	document.ast = result.ast;
 }
