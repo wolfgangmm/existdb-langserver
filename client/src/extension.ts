@@ -12,7 +12,7 @@ import {
 	Task, TaskExecution, QuickPickItem
 } from 'vscode';
 import { LanguageClient, LanguageClientOptions, TransportKind, GenericNotificationHandler, RevealOutputChannelOn } from "vscode-languageclient/node";
-import QueryResultsProvider from './query-results-provider';
+import QueryResultsProvider, { CursorState } from './query-results-provider';
 
 class TaskPickItem implements QuickPickItem {
 	label: string = '';
@@ -230,6 +230,24 @@ export function activate(extensionContext: ExtensionContext) {
 	taskStatusbar.tooltip = "eXist-db: click to configure automatic synchronization";
 	taskStatusbar.command = "existdb.control-sync";
 
+	// Output format status bar
+	const formatStatusbar = Window.createStatusBarItem(StatusBarAlignment.Right, 0);
+	function updateFormatStatusbar() {
+		const config = Workspace.getConfiguration('existdb');
+		const method = config.get<string>('query.serializationMethod', 'adaptive');
+		const label = method.charAt(0).toUpperCase() + method.slice(1);
+		formatStatusbar.text = `$(symbol-string) ${label}`;
+		formatStatusbar.tooltip = 'eXist-db: click to change output format';
+		formatStatusbar.command = 'existdb.setOutputFormat';
+		formatStatusbar.show();
+	}
+	updateFormatStatusbar();
+	Workspace.onDidChangeConfiguration(e => {
+		if (e.affectsConfiguration('existdb.query')) {
+			updateFormatStatusbar();
+		}
+	});
+
 	async function updateTaskStatusbarVisibility() {
 		if (!Workspace.workspaceFolders || Workspace.workspaceFolders.length === 0) {
 			taskStatusbar.hide();
@@ -395,94 +413,160 @@ export function activate(extensionContext: ExtensionContext) {
 	});
 	context.subscriptions.push(command);
 
+	function getClientForUri(uri: Uri): LanguageClient | undefined {
+		let folder = Workspace.getWorkspaceFolder(uri);
+		if (!folder || uri.scheme === 'untitled') {
+			return defaultClient;
+		}
+		folder = getOuterMostWorkspaceFolder(folder);
+		return clients.get(folder.uri.toString());
+	}
+
+	function getSerializationOptions(queryText: string): Record<string, string> {
+		const config = Workspace.getConfiguration('existdb');
+		const options: Record<string, string> = {
+			method: config.get<string>('query.serializationMethod', 'adaptive'),
+			indent: config.get<boolean>('query.indent', true) ? 'yes' : 'no'
+		};
+		// Auto-enable highlight-matches for Lucene full-text queries
+		if (/\bft:(query|search)\b/.test(queryText)) {
+			options['highlight-matches'] = 'both';
+		}
+		return options;
+	}
+
+	function formatResultItems(items: any[], output: string): string {
+		if (!Array.isArray(items) || items.length === 0) {
+			return '';
+		}
+		return items.map((item: any) => {
+			if (typeof item === 'string') {
+				return item;
+			}
+			return item.value != null ? String(item.value) : '';
+		}).join('\n');
+	}
+
+	function buildHeader(hits: number, elapsed: string | number, output: string, showing: number): string {
+		let message = `Query returned ${hits} in ${elapsed}ms.`;
+		if (hits > showing) {
+			message += ` Showing ${showing} of ${hits} items.`;
+		}
+		switch (output) {
+			case 'xml':
+			case 'html':
+			case 'html5':
+				return `<!-- ${message} -->\n`;
+			case 'json':
+				return '';
+			default:
+				return `(:  ${message} :)\n`;
+		}
+	}
+
+	function getLangForOutput(output: string): string {
+		switch (output) {
+			case 'adaptive':
+				return 'xquery';
+			case 'html':
+			case 'html5':
+				return 'html';
+			case 'json':
+				return 'json';
+			default:
+				return 'xml';
+		}
+	}
+
+	function displayResults(queryResult: any, resultsProvider: QueryResultsProvider) {
+		const hits = typeof queryResult.hits === 'string' ? parseInt(queryResult.hits) : (queryResult.hits || 0);
+		const elapsed = queryResult.elapsed || '0';
+		const output = queryResult.output || 'adaptive';
+
+		// Cursor-based results: items come as array from cursor:fetch
+		let content: string;
+		let showing: number;
+		if (queryResult.cursor && Array.isArray(queryResult.results)) {
+			const formatted = formatResultItems(queryResult.results, output);
+			showing = queryResult.results.length;
+			content = buildHeader(hits, elapsed, output, showing) + formatted;
+
+			// Track cursor state for paging
+			resultsProvider.cursorState = {
+				cursor: queryResult.cursor,
+				hits,
+				fetched: showing,
+				output,
+				pageSize: 100
+			};
+		} else {
+			// Legacy string results
+			content = queryResult.results || '';
+			showing = Math.min(hits, 100);
+			if (hits) {
+				content = buildHeader(hits, elapsed, output, showing) + content;
+			}
+			resultsProvider.clearCursor();
+		}
+
+		if (output === 'html' || output === 'html5' || output === 'xhtml') {
+			const panel = Window.createWebviewPanel(
+				'existdb-query',
+				'eXistdb Query Result',
+				ViewColumn.Beside
+			);
+			panel.webview.html = content;
+			resultsProvider.clearCursor();
+		} else {
+			const lang = getLangForOutput(output);
+			resultsProvider.update(content);
+			Workspace.openTextDocument(resultsProvider.queryResultsUri).then((document) => {
+				Languages.setTextDocumentLanguage(document, lang);
+				Window.showTextDocument(document, { viewColumn: ViewColumn.Beside, preview: true, preserveFocus: true });
+			});
+		}
+	}
+
 	command = commands.registerCommand('existdb.execute', () => {
+		// Close any previous cursor before starting a new query
+		if (resultsProvider.cursorState) {
+			const prevCursor = resultsProvider.cursorState.cursor;
+			resultsProvider.clearCursor();
+			const editor = Window.activeTextEditor;
+			if (editor) {
+				const client = getClientForUri(editor.document.uri);
+				if (client) {
+					client.sendRequest('workspace/executeCommand', {
+						command: 'closeCursor',
+						arguments: [prevCursor]
+					}).catch(() => {});
+				}
+			}
+		}
+
 		Window.withProgress({
 			location: ProgressLocation.Notification,
 			title: "Executing query!",
 			cancellable: false
 		}, (progress) => {
-			return new Promise((resolve, reject) => {
+			return new Promise<void>((resolve, reject) => {
 				const editor = Window.activeTextEditor;
 				if (editor) {
 					const text = editor.document.getText();
 					const uri = editor.document.uri;
-					let folder = Workspace.getWorkspaceFolder(uri);
-					let result;
-					if ((!folder || uri.scheme === 'untitled')) {
-						result = defaultClient.sendRequest('workspace/executeCommand', {
+					const client = getClientForUri(uri);
+					if (client) {
+						const serializationOptions = getSerializationOptions(text);
+						client.sendRequest('workspace/executeCommand', {
 							command: 'execute',
-							arguments: [uri.toString(), text]
-						});
-					} else {
-						folder = getOuterMostWorkspaceFolder(folder);
-						const client = clients.get(folder.uri.toString());
-						if (client) {
-							result = client.sendRequest('workspace/executeCommand', {
-								command: 'execute',
-								arguments: [uri.toString(), text]
-							});
-						}
-					}
-					if (result) {
-						result.then((queryResult: any) => {
+							arguments: [uri.toString(), text, serializationOptions]
+						}).then((queryResult: any) => {
 							if (!queryResult || typeof queryResult !== 'object') {
 								reject();
 								return;
 							}
-							let content: string = queryResult.results || '';
-							if (queryResult.hits) {
-								const hits = typeof queryResult.hits === 'string' ? parseInt(queryResult.hits) : queryResult.hits;
-								const elapsed = queryResult.elapsed || '0';
-								let message = `Query returned ${hits} in ${elapsed}ms.`;
-								if (hits > 100) {
-									message += ' Showing first 100 results.';
-								}
-								switch (queryResult.output) {
-									case 'xml':
-									case 'html':
-									case 'html5':
-										content = `<!-- ${message} -->\n${queryResult.results || ''}`;
-										break;
-									case 'json':
-										content = queryResult.results || '';
-										break;
-									default:
-										content = `(:  ${message} :)\n${queryResult.results || ''}`;
-										break;
-								}
-							}
-							if (queryResult.output === 'html' || queryResult.output === 'html5' ||
-								queryResult.output === 'xhtml') {
-								const panel = Window.createWebviewPanel(
-									'existdb-query',
-									'eXistdb Query Result',
-									ViewColumn.Beside
-								);
-
-								panel.webview.html = content;
-							} else {
-								let lang: string;
-								switch (queryResult.output) {
-									case 'adaptive':
-										lang = 'xquery';
-										break;
-									case 'html':
-									case 'html5':
-										lang = 'html';
-										break;
-									case 'json':
-										lang = 'json';
-										break;
-									default:
-										lang = 'xml';
-								}
-								resultsProvider.update(content);
-								Workspace.openTextDocument(resultsProvider.queryResultsUri).then((document) => {
-									Languages.setTextDocumentLanguage(document, lang);
-									Window.showTextDocument(document, { viewColumn: ViewColumn.Beside, preview: true, preserveFocus: true });
-								});
-							}
-							resolve(null);
+							displayResults(queryResult, resultsProvider);
+							resolve();
 						}).catch((error) => {
 							Window.showWarningMessage(`Could not query server: ${error}`);
 							reject();
@@ -490,6 +574,81 @@ export function activate(extensionContext: ExtensionContext) {
 					}
 				}
 			});
+		});
+	});
+	context.subscriptions.push(command);
+
+	command = commands.registerCommand('existdb.loadMoreResults', () => {
+		const state = resultsProvider.cursorState;
+		if (!state) {
+			Window.showInformationMessage('No more results to load.');
+			return;
+		}
+		if (state.fetched >= state.hits) {
+			Window.showInformationMessage('All results have been loaded.');
+			return;
+		}
+		const editor = Window.activeTextEditor;
+		if (!editor) {
+			return;
+		}
+		const client = getClientForUri(editor.document.uri);
+		if (!client) {
+			return;
+		}
+
+		Window.withProgress({
+			location: ProgressLocation.Notification,
+			title: "Loading more results...",
+			cancellable: false
+		}, () => {
+			const start = state.fetched + 1;
+			const count = state.pageSize;
+			const queryText = editor.document.getText();
+			const serializationOptions = getSerializationOptions(queryText);
+			return client.sendRequest('workspace/executeCommand', {
+				command: 'fetch',
+				arguments: [state.cursor, start, count, serializationOptions]
+			}).then((items: any) => {
+				if (Array.isArray(items) && items.length > 0) {
+					const page = '\n' + formatResultItems(items, state.output);
+					state.fetched += items.length;
+					resultsProvider.appendResults(page);
+				}
+				if (state.fetched >= state.hits) {
+					// All results fetched — close cursor
+					client.sendRequest('workspace/executeCommand', {
+						command: 'closeCursor',
+						arguments: [state.cursor]
+					}).catch(() => {});
+					resultsProvider.clearCursor();
+					Window.showInformationMessage('All results loaded.');
+				}
+			}).catch((error) => {
+				Window.showWarningMessage(`Failed to fetch results: ${error}`);
+			});
+		});
+	});
+	context.subscriptions.push(command);
+
+	command = commands.registerCommand('existdb.setOutputFormat', () => {
+		const config = Workspace.getConfiguration('existdb');
+		const current = config.get<string>('query.serializationMethod', 'adaptive');
+		const formats = [
+			{ label: 'Adaptive', value: 'adaptive', description: 'XQuery default output' },
+			{ label: 'XML', value: 'xml', description: 'XML serialization' },
+			{ label: 'JSON', value: 'json', description: 'JSON serialization' },
+			{ label: 'Text', value: 'text', description: 'Plain text' }
+		];
+		const items = formats.map(f => ({
+			label: f.value === current ? `$(check) ${f.label}` : f.label,
+			description: f.description,
+			value: f.value
+		}));
+		Window.showQuickPick(items, { placeHolder: 'Select output format' }).then(pick => {
+			if (pick) {
+				config.update('query.serializationMethod', (pick as any).value, false);
+			}
 		});
 	});
 	context.subscriptions.push(command);

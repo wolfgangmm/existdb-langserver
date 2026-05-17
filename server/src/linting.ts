@@ -1,6 +1,6 @@
 /**
  * Support for linting XQuery documents.
- * 
+ *
  * @author Wolfgang Meier
  */
 import { Diagnostic, DiagnosticSeverity, Range, ResponseError, ErrorCodes } from 'vscode-languageserver';
@@ -24,33 +24,35 @@ export function lintDocument(text: string, relPath: string, document: AnalyzedDo
 }
 
 function serverLint(text: String, settings: ServerSettings, relPath: string, document: AnalyzedDocument): Promise<AnalyzedDocument | ResponseError<any>> {
-	return axios.put(`${settings.uri}/apps/atom-editor/compile.xql`, text, {
+	return axios.post(`${settings.uri}/apps/existdb-openapi/api/langservice/diagnostics`, {
+		query: text,
+		"module-load-path": `${settings.path}/${relPath}`
+	}, {
 		auth: {
 			username: settings.user,
 			password: settings.password
 		},
 		headers: {
-			"X-BasePath": `${settings.path}/${relPath}`,
-			"Content-Type": "application/octet-stream"
+			"Content-Type": "application/json"
 		},
-		responseType: 'text'
+		responseType: 'json'
 	}).then(response => {
 		if (response.status !== 200) {
 			document.status(false, settings);
 			return document;
 		}
 		document.status(true, settings);
-		const json = JSON.parse(response.data);
-		if (json.result !== 'pass') {
-			const error = parseErrorMessage(json.error);
-			if (!error.line) {
-				document.status(false, settings);
-				return document;
-			} else {
-				const diagnostic: Diagnostic = {
-					severity: DiagnosticSeverity.Error,
-					range: Range.create(error.line, error.column, error.line, error.column),
-					message: error.msg,
+		const diagnostics: any[] = response.data;
+		if (Array.isArray(diagnostics)) {
+			for (const d of diagnostics) {
+				// lang:diagnostics returns 1-indexed lines; LSP protocol uses 0-indexed
+			const line = Math.max(d.line - 1, 0);
+			const column = Math.max(d.column - 1, 0);
+			const diagnostic: Diagnostic = {
+					severity: mapSeverity(d.severity),
+					range: Range.create(line, column, line, column),
+					message: d.message,
+					code: d.code,
 					source: 'xquery'
 				};
 				document.diagnostics.push(diagnostic);
@@ -63,48 +65,29 @@ function serverLint(text: String, settings: ServerSettings, relPath: string, doc
 	});
 }
 
-function parseErrorMessage(error: any) {
-	let msg;
-	if (error.line) {
-		msg = error["#text"];
-	} else {
-		msg = error;
+function mapSeverity(severity: string | number): DiagnosticSeverity {
+	if (typeof severity === 'number') {
+		// LSP DiagnosticSeverity: 1=Error, 2=Warning, 3=Information, 4=Hint
+		if (severity >= 1 && severity <= 4) {
+			return severity as DiagnosticSeverity;
+		}
+		return DiagnosticSeverity.Error;
 	}
-
-	let str = /.*line:?\s*(\d+),\s*column:?\s*(\d+)/i.exec(msg);
-	let line = 0;
-	let column = 0;
-	if (str && str.length === 3) {
-		line = parseInt(str[1]) - 1;
-		column = parseInt(str[2]) - 1;
-	} else {
-		line = parseInt(error.line) - 1;
-		column = parseInt(error.column) - 1;
+	switch (severity) {
+		case 'error': return DiagnosticSeverity.Error;
+		case 'warning': return DiagnosticSeverity.Warning;
+		case 'info': return DiagnosticSeverity.Information;
+		case 'hint': return DiagnosticSeverity.Hint;
+		default: return DiagnosticSeverity.Error;
 	}
-
-	return { line: Math.max(line, 0), column: Math.max(column, 0), msg: msg };
 }
 
-function xqlint(uri: String, text: String, document: AnalyzedDocument): Diagnostic[] {
+function xqlint(uri: String, text: String, document: AnalyzedDocument): void {
 	const xqlint = new XQLint(text, {
 		fileName: uri
 	});
+	// Keep AST for local symbol lookup (hover, go-to-definition).
+	// Skip getWarnings() — server-side lang:diagnostics handles error
+	// checking without the false positives xqlint produces (e.g. #67).
 	document.ast = xqlint.getAST();
-	const warnings:any[] = xqlint.getWarnings();
-	const diagnostics: Diagnostic[] = [];
-	warnings.forEach(warning => {
-		const diagnostic: Diagnostic = {
-			severity: DiagnosticSeverity.Warning,
-			range: Range.create(
-				warning.pos.sl,
-				warning.pos.sc,
-				warning.pos.el,
-				warning.pos.ec),
-			message: warning.message,
-			source: 'xquery'
-		};
-		diagnostics.push(diagnostic);
-	});
-	document.diagnostics = diagnostics;
-	return diagnostics;
 }

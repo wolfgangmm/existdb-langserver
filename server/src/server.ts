@@ -7,8 +7,12 @@ import {
 	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, Position,
 	DidChangeConfigurationNotification, TextDocumentPositionParams, CompletionItem,
 	WorkspaceFolder, ResponseError, DocumentSymbolParams,
-	SymbolInformation, Hover,
-	Location, ConfigurationItem
+	SymbolInformation, SymbolKind, Hover,
+	Location, ConfigurationItem, ReferenceParams,
+	DocumentFormattingParams, TextEdit, Range,
+	SemanticTokensParams, SemanticTokensBuilder, SemanticTokensLegend,
+	SemanticTokenTypes, SemanticTokenModifiers,
+	SignatureHelp, SignatureHelpParams, RenameParams, WorkspaceEdit
 } from 'vscode-languageserver/node';
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from 'vscode-uri';
@@ -16,6 +20,25 @@ import { ServerSettings } from './settings';
 import { AnalyzedDocument } from './analyzed-document';
 import { checkServer, installXar, readWorkspaceConfig, createWorkspaceConfig } from './utils';
 import { lintDocument } from './linting';
+import axios from 'axios';
+
+// Semantic token types used by XQuery highlighting
+const tokenTypes = [
+	SemanticTokenTypes.function,
+	SemanticTokenTypes.variable,
+	SemanticTokenTypes.namespace,
+	SemanticTokenTypes.decorator,  // annotations
+	SemanticTokenTypes.type,
+	SemanticTokenTypes.parameter
+];
+const tokenModifiers = [
+	SemanticTokenModifiers.declaration,
+	SemanticTokenModifiers.definition
+];
+const semanticTokensLegend: SemanticTokensLegend = {
+	tokenTypes: tokenTypes,
+	tokenModifiers: tokenModifiers
+};
 
 const defaultSettings: ServerSettings = {
 	uri: 'http://localhost:8080/exist',
@@ -45,6 +68,7 @@ let resourcesDir: string;
 // capabilities of the client
 let hasConfigurationCapability: boolean = false;
 let hasWorkspaceFolderCapability: boolean = false;
+let hasLspEval: boolean = false;
 
 function getAnalyzedDocument(textDocument: TextDocument) {
 	let document = analyzedDocuments.get(textDocument.uri);
@@ -157,17 +181,75 @@ connection.onInitialize((params) => {
 			},
 			documentSymbolProvider: true,
 			definitionProvider: true,
-			hoverProvider: true
+			hoverProvider: true,
+			referencesProvider: true,
+			documentFormattingProvider: true,
+			signatureHelpProvider: {
+				triggerCharacters: ['(', ',']
+			},
+			renameProvider: true,
+			semanticTokensProvider: {
+				legend: semanticTokensLegend,
+				full: true
+			}
 		}
 	};
 });
+
+async function checkLspEvalCapability(settings: ServerSettings): Promise<boolean> {
+	// Read the capabilities endpoint introduced in existdb-openapi#17. The
+	// previous probe-hack (sending a dummy query and inspecting the response
+	// for a cursor field) is no longer needed.
+	try {
+		const response = await axios.get(`${settings.uri}/apps/existdb-openapi/api/langservice/capabilities`, {
+			auth: { username: settings.user, password: settings.password },
+			responseType: 'json'
+		});
+		if (response.status === 200 && response.data && response.data.cursor) {
+			return response.data.cursor.available === true;
+		}
+	} catch (_) {
+		// endpoint not available; legacy execution path will be used
+	}
+	return false;
+}
+
+async function checkExistApiAvailable(settings: ServerSettings): Promise<boolean> {
+	try {
+		const response = await axios.post(`${settings.uri}/apps/existdb-openapi/api/langservice/diagnostics`, {
+			expression: '1'
+		}, {
+			auth: { username: settings.user, password: settings.password },
+			headers: { "Content-Type": "application/json" },
+			responseType: 'json'
+		});
+		return response.status === 200;
+	} catch (_) {
+		return false;
+	}
+}
 
 async function checkServerConnection() {
 	if (resourcesDir) {
 		const settings = await getSettings();
 		log(`Checking connection to ${settings.uri}`);
 		reportStatus('Connecting ...', settings);
-		checkServer(settings, resourcesDir).then(response => {
+
+		// Check if existdb-openapi provides langservice endpoints — if so, skip the
+		// atom-editor helper XAR prompt since existdb-openapi supersedes it
+		const hasExistApi = await checkExistApiAvailable(settings);
+		if (hasExistApi) {
+			log('existdb-openapi langservice endpoints available, skipping helper XAR check');
+			if (workspaceName !== noWorkspace) {
+				log(`Connection ok`);
+				reportStatus(workspaceName, settings);
+			}
+			hasLspEval = await checkLspEvalCapability(settings);
+			log(`cursor:eval capability: ${hasLspEval ? 'available' : 'not available, using legacy execution'}`);
+			return;
+		}
+
+		checkServer(settings, resourcesDir).then(async response => {
 			if (response) {
 				log(`Sending existdb/install notification ${response.xar.path}`);
 				connection.sendNotification('existdb/install', [response.message, response.xar]);
@@ -176,9 +258,13 @@ async function checkServerConnection() {
 				log(`Connection ok`);
 				reportStatus(workspaceName, settings);
 			}
+			// Check if cursor-based execution is available
+			hasLspEval = await checkLspEvalCapability(settings);
+			log(`cursor:eval capability: ${hasLspEval ? 'available' : 'not available, using legacy execution'}`);
 		},
 		(message) => {
 			log(`Connection failed: ${message}`);
+			hasLspEval = false;
 			connection.window.showWarningMessage(`Connection failed: ${message}`);
 			connection.sendNotification('existdb/status', ['$(database) Disonnected', settings.uri]);
 		});
@@ -265,12 +351,16 @@ connection.onExecuteCommand(params => {
 			return deployXar(params.arguments);
 		case 'execute':
 			return executeQuery(params.arguments);
+		case 'fetch':
+			return fetchResults(params.arguments);
+		case 'closeCursor':
+			return closeCursor(params.arguments);
 	}
 });
 
 async function executeQuery(args: any[] | undefined): Promise<any> {
 	if (args) {
-		const [uri, text] = args;
+		const [uri, text, serializationOptions] = args;
 		const settings = await getSettings();
 		let document = analyzedDocuments.get(uri);
 		if (!document) {
@@ -278,9 +368,33 @@ async function executeQuery(args: any[] | undefined): Promise<any> {
 			analyzedDocuments.set(uri, document);
 		}
 		const relPath = getRelativePath(uri.toString());
+		if (hasLspEval) {
+			return document.evalQuery(text, settings, relPath, 100, serializationOptions);
+		}
 		return document.executeQuery(text, settings, relPath);
 	}
 	return [];
+}
+
+async function fetchResults(args: any[] | undefined): Promise<any> {
+	if (args) {
+		const [cursor, start, count, serializationOptions] = args;
+		const settings = await getSettings();
+		// Use a temporary AnalyzedDocument for the REST call
+		const doc = new AnalyzedDocument('fetch', null, log, reportStatus);
+		return doc.fetchResults(cursor, start, count, settings, serializationOptions);
+	}
+	return [];
+}
+
+async function closeCursor(args: any[] | undefined): Promise<boolean> {
+	if (args) {
+		const [cursor] = args;
+		const settings = await getSettings();
+		const doc = new AnalyzedDocument('close', null, log, reportStatus);
+		return doc.closeCursor(cursor, settings);
+	}
+	return false;
 }
 
 async function lint(textDocument: TextDocument) {
@@ -334,7 +448,7 @@ async function autocomplete(position: TextDocumentPositionParams): Promise<Compl
 	}
 	const prefix = text.substring(start, offset);
 	const relPath = getRelativePath(uri);
-	const resp = await document.getCompletions(prefix, relPath, settings);
+	const resp = await document.getCompletions(text, prefix, relPath, settings);
 	if (resp instanceof ResponseError) {
 		connection.console.log(`[${workspaceName}] ${resp}`);
 	} else {
@@ -348,13 +462,41 @@ connection.onCompletionResolve((item: CompletionItem): CompletionItem => {
 	return item;
 });
 
-connection.onDocumentSymbol((params: DocumentSymbolParams): SymbolInformation[] => {
+connection.onDocumentSymbol(async (params: DocumentSymbolParams): Promise<SymbolInformation[]> => {
 	const uri = params.textDocument.uri;
 	const textDocument = documents.get(uri);
 	if (!textDocument) {
 		return [];
 	}
 	const document = getAnalyzedDocument(textDocument);
+	const settings = await getSettings();
+	const relPath = getRelativePath(uri);
+
+	// Try server-side symbols for richer results (return types, parameter types)
+	try {
+		const response = await axios.post(`${settings.uri}/apps/existdb-openapi/api/langservice/symbols`, {
+			query: textDocument.getText(),
+			"module-load-path": `${settings.path}/${relPath}`
+		}, {
+			auth: { username: settings.user, password: settings.password },
+			headers: { "Content-Type": "application/json" },
+			responseType: 'json'
+		});
+
+		if (response.status === 200 && Array.isArray(response.data) && response.data.length > 0) {
+			return response.data.map((sym: any) => ({
+				name: sym.detail || sym.name,
+				kind: sym.kind === 12 ? SymbolKind.Function : SymbolKind.Variable,
+				location: {
+					uri,
+					range: Range.create(sym.line || 0, sym.column || 0, sym.line || 0, sym.column || 0)
+				}
+			}));
+		}
+	} catch (e) {
+		// Fall through to local symbols
+	}
+
 	return document.getDocumentSymbols(textDocument);
 });
 
@@ -370,7 +512,7 @@ async function hover(uri: string, position: Position) {
 	const document = getAnalyzedDocument(textDocument);
 	const relPath = getRelativePath(uri);
 	const settings = await getSettings();
-	return document.getHover(position, relPath, settings);
+	return document.getHover(position, relPath, textDocument, settings);
 }
 
 connection.onDefinition((params: TextDocumentPositionParams): Promise<Location | null> => {
@@ -387,6 +529,223 @@ async function gotoDefinition(uri: string, position: Position) {
 	const settings = await getSettings();
 	return document.gotoDefinition(position, relPath, textDocument, settings);
 }
+
+// --- Find References ---
+connection.onReferences(async (params: ReferenceParams): Promise<Location[]> => {
+	const uri = params.textDocument.uri;
+	const textDocument = documents.get(uri);
+	if (!textDocument) {
+		return [];
+	}
+	const settings = await getSettings();
+	const relPath = getRelativePath(uri);
+
+	try {
+		const response = await axios.post(`${settings.uri}/apps/existdb-openapi/api/langservice/references`, {
+			query: textDocument.getText(),
+			line: params.position.line + 1,
+			column: params.position.character + 1,
+			"module-load-path": `${settings.path}/${relPath}`
+		}, {
+			auth: { username: settings.user, password: settings.password },
+			headers: { "Content-Type": "application/json" },
+			responseType: 'json'
+		});
+
+		if (response.status === 200 && Array.isArray(response.data)) {
+			return response.data.map((ref: any) => ({
+				uri,
+				range: Range.create(
+					Math.max(ref.line - 1, 0),
+					Math.max((ref.column || 1) - 1, 0),
+					Math.max(ref.line - 1, 0),
+					Math.max((ref.column || 1) - 1, 0)
+				)
+			}));
+		}
+	} catch (e) {
+		// Server doesn't support references yet
+	}
+	return [];
+});
+
+// --- Signature Help ---
+connection.onSignatureHelp(async (params: SignatureHelpParams): Promise<SignatureHelp | null> => {
+	const uri = params.textDocument.uri;
+	const textDocument = documents.get(uri);
+	if (!textDocument) {
+		return null;
+	}
+	const settings = await getSettings();
+	const relPath = getRelativePath(uri);
+
+	try {
+		const response = await axios.post(`${settings.uri}/apps/existdb-openapi/api/langservice/signatureHelp`, {
+			expression: textDocument.getText(),
+			line: params.position.line,
+			column: params.position.character,
+			"module-load-path": `${settings.path}/${relPath}`
+		}, {
+			auth: { username: settings.user, password: settings.password },
+			headers: { "Content-Type": "application/json" },
+			responseType: 'json'
+		});
+
+		if (response.status === 200 && response.data?.signatures) {
+			return {
+				signatures: response.data.signatures.map((sig: any) => ({
+					label: sig.label,
+					documentation: sig.documentation,
+					parameters: sig.parameters?.map((p: any) => ({
+						label: p.label,
+						documentation: p.documentation
+					}))
+				})),
+				activeSignature: response.data.activeSignature || 0,
+				activeParameter: response.data.activeParameter || 0
+			};
+		}
+	} catch (e) {
+		// Server doesn't support signature help yet
+	}
+	return null;
+});
+
+// --- Rename Symbol ---
+connection.onRenameRequest(async (params: RenameParams): Promise<WorkspaceEdit | null> => {
+	const uri = params.textDocument.uri;
+	const textDocument = documents.get(uri);
+	if (!textDocument) {
+		return null;
+	}
+	const settings = await getSettings();
+	const relPath = getRelativePath(uri);
+
+	try {
+		const response = await axios.post(`${settings.uri}/apps/existdb-openapi/api/langservice/rename`, {
+			expression: textDocument.getText(),
+			line: params.position.line,
+			column: params.position.character,
+			newName: params.newName,
+			"module-load-path": `${settings.path}/${relPath}`
+		}, {
+			auth: { username: settings.user, password: settings.password },
+			headers: { "Content-Type": "application/json" },
+			responseType: 'json'
+		});
+
+		if (response.status === 200 && response.data?.changes && Array.isArray(response.data.changes)) {
+			const changes: { [uri: string]: TextEdit[] } = {};
+			changes[uri] = response.data.changes.map((edit: any) => {
+				// existdb-openapi returns 0-based line but 1-based column
+				const startLine = edit.line;
+				const startCol = Math.max(edit.column - 1, 0);
+				const endCol = Math.max(edit.endColumn - 1, 0);
+				return {
+					range: Range.create(startLine, startCol, startLine, endCol),
+					newText: edit.newText
+				};
+			});
+			return { changes };
+		}
+	} catch (e) {
+		// Server doesn't support rename yet
+	}
+	return null;
+});
+
+// --- Semantic Tokens ---
+connection.languages.semanticTokens.on(async (params: SemanticTokensParams) => {
+	const uri = params.textDocument.uri;
+	const textDocument = documents.get(uri);
+	if (!textDocument) {
+		return { data: [] };
+	}
+	const settings = await getSettings();
+	const relPath = getRelativePath(uri);
+	const text = textDocument.getText();
+	const builder = new SemanticTokensBuilder();
+
+	try {
+		const response = await axios.post(`${settings.uri}/apps/existdb-openapi/api/langservice/symbols`, {
+			query: text,
+			"module-load-path": `${settings.path}/${relPath}`
+		}, {
+			auth: { username: settings.user, password: settings.password },
+			headers: { "Content-Type": "application/json" },
+			responseType: 'json'
+		});
+
+		if (response.status === 200 && Array.isArray(response.data)) {
+			for (const symbol of response.data) {
+				// lang:symbols returns 0-indexed line/column
+				const line = symbol.line || 0;
+				const col = symbol.column || 0;
+				const name = (symbol.name || '').replace(/#\d+$/, '');
+				const length = name.length;
+				// Map symbol kind to semantic token type
+				const kind = symbol.kind;
+				let tokenType = 0; // function
+				if (kind === 6 || kind === 13) { // Variable or Property
+					tokenType = 1; // variable
+				}
+				builder.push(line, col, length, tokenType, 1); // modifier: declaration
+			}
+		}
+	} catch (e) {
+		// Fall back to local symbols
+		const document = getAnalyzedDocument(textDocument);
+		const symbols = document.getDocumentSymbols(textDocument);
+		for (const sym of symbols) {
+			const line = sym.location.range.start.line;
+			const col = sym.location.range.start.character;
+			const name = sym.name.replace(/\(.*$/, '');
+			const length = name.length;
+			const tokenType = sym.kind === SymbolKind.Function ? 0 : 1;
+			builder.push(line, col, length, tokenType, 1);
+		}
+	}
+
+	return builder.build();
+});
+
+// --- Document Formatting (XQuery only) ---
+connection.onDocumentFormatting(async (params: DocumentFormattingParams): Promise<TextEdit[]> => {
+	const uri = params.textDocument.uri;
+	const textDocument = documents.get(uri);
+	if (!textDocument) {
+		return [];
+	}
+
+	// Only format XQuery files — VS Code handles other languages natively
+	const ext = uri.replace(/^.*\./, '').toLowerCase();
+	if (!['xq', 'xql', 'xqm', 'xquery', 'xqy'].includes(ext)) {
+		return [];
+	}
+
+	const text = textDocument.getText();
+	try {
+		const prettier = require('prettier');
+		const xqPlugin = require('prettier-plugin-xquery');
+
+		const formatted = await prettier.format(text, {
+			parser: 'xquery',
+			plugins: [xqPlugin],
+			tabWidth: params.options.tabSize,
+			useTabs: !params.options.insertSpaces
+		});
+
+		const lastLine = textDocument.lineCount - 1;
+		const lastChar = textDocument.getText().length;
+		return [{
+			range: Range.create(0, 0, lastLine, lastChar),
+			newText: formatted
+		}];
+	} catch (e) {
+		log(`XQuery formatting failed: ${e}`, 'error');
+		return [];
+	}
+});
 
 connection.onDidChangeWatchedFiles(() => {
 	log(`Reloading workspace config`);

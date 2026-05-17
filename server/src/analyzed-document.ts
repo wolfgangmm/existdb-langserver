@@ -3,21 +3,11 @@ import { ServerSettings } from './settings';
 import { AST } from './ast';
 import axios from 'axios';
 import * as path from 'path';
-import * as fs from 'fs';
 import { URI } from 'vscode-uri';
 
 const funcDefRe = /(?:\(:~(.*?):\))?\s*declare\s+((?:%[\w\:\-]+(?:\([^\)]*\))?\s*)*function\s+([^\(]+)\()/gsm;
 const trimRe = /^[\x09\x0a\x0b\x0c\x0d\x20\xa0\u1680\u180e\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000]+|[\x09\x0a\x0b\x0c\x0d\x20\xa0\u1680\u180e\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000]+$/g;
 const paramRe = /\$[^\s]+/;
-const importRe = /(import\s+module\s+namespace\s+[^=]+\s*=\s*["'][^"']+["']\s*(?:at\s+["'][^"']+["'])?\s*;)/g;
-const moduleRe = /import\s+module\s+namespace\s+([^=\s]+)\s*=\s*["']([^"']+)["']\s*at\s+["']([^"']+)["']\s*;/;
-
-interface Import {
-	prefix: string;
-	uri: string;
-	source?: string;
-	isJava?: boolean;
-}
 
 interface Symbol {
 	signature: string;
@@ -51,8 +41,6 @@ export class AnalyzedDocument {
 
 	symbolsMap: Map<string, Symbol> = new Map();
 
-	imports: Map<string, Import> = new Map();
-
 	ast: any;
 
 	logger: (message: string, prio?: string) => void;
@@ -73,13 +61,13 @@ export class AnalyzedDocument {
 		this.symbolsMap.clear();
 		AnalyzedDocument.getLocalSymbols(text, false, this.symbolsMap);
 		this.localSymbols = Array.from(this.symbolsMap.values());
-		this.parseImports(text);
 	}
 
 	async gotoDefinition(position: Position, relPath: string, textDocument: TextDocument, settings: ServerSettings): Promise<Location | null> {
 		if (!this.ast) {
 			return null;
 		}
+		// Try local symbol lookup first (no roundtrip)
 		const signature = this.getSignatureFromPosition(position);
 		if (signature) {
 			const symbol = this.symbolsMap.get(`${signature.name}#${signature.arity}`);
@@ -88,82 +76,75 @@ export class AnalyzedDocument {
 					uri: this.uri,
 					range: this.computeLocation(textDocument, symbol.location)
 				};
-			} else {
-				return this.gotoDefinitionRemote(signature, relPath, textDocument, settings);
 			}
+			// Fall back to server-side definition
+			return this.gotoDefinitionRemote(textDocument, position, relPath, settings);
 		}
 		return null;
 	}
 
-	private async gotoDefinitionRemote(signature: any, relPath: string, textDocument: TextDocument, settings: ServerSettings): Promise<Location | null> {
-		const params = this.getParameters(signature, relPath, settings);
+	private async gotoDefinitionRemote(textDocument: TextDocument, position: Position, relPath: string, settings: ServerSettings): Promise<Location | null> {
 		try {
-			const options = this.getOptions(params, settings);
-			const response = await axios.get(options.uri, {
+			// lang:* / cursor:* expects 1-indexed line/column
+			const response = await axios.post(`${settings.uri}/apps/existdb-openapi/api/langservice/definition`, {
+				query: textDocument.getText(),
+				line: position.line + 1,
+				column: position.character + 1,
+				"module-load-path": `${settings.path}/${relPath}`
+			}, {
 				auth: {
 					username: settings.user,
 					password: settings.password
 				},
-				params: options.qs,
-				responseType: 'text'
+				headers: { "Content-Type": "application/json" },
+				responseType: 'json'
 			});
-			
+
 			if (response.status !== 200) {
 				this.status(false, settings);
 				return null;
 			}
-			
-			const json = JSON.parse(response.data);
-			if (json.length == 0) {
-				this.logger(`no description found for ${params.signature}`, 'info');
+
+			this.status(true, settings);
+			const def = response.data;
+			if (!def || !def.line && def.line !== 0) {
 				return null;
 			}
-			
-			this.status(true, settings);
-			const desc = json[0];
-			const rp = path.relative(`${settings.path}/${relPath}`, desc.path);
-			const fp = URI.parse(this.uri).fsPath;
-			const absPath = path.resolve(path.dirname(fp), rp);
-			console.log(`reading ${absPath}`);
-			
-			return new Promise((resolve) => {
-				fs.readFile(absPath, { encoding: 'utf-8' }, (err: NodeJS.ErrnoException | null, content: string | Buffer) => {
-					if (err || !content) {
-						this.logger(`failed to parse ${absPath}`, 'error');
-						resolve(null);
-						return;
-					}
-					const contentStr = typeof content === 'string' ? content : content.toString('utf-8');
-					const symbol = AnalyzedDocument.getLocalSymbol(contentStr, signature.name, signature.arity);
-					if (symbol && symbol.location) {
-						resolve({
-							uri: URI.file(absPath).toString(),
-							range: {
-								start: {
-									line: symbol.location.start,
-									character: 0
-								},
-								end: {
-									line: symbol.location.end + 1,
-									character: Number.MAX_VALUE
-								}
-							}
-						});
-					} else {
-						resolve(null);
-					}
-				});
-			});
+
+			// lang:* / cursor:* returns 1-indexed; convert to 0-indexed for LSP protocol
+			const defLine = Math.max(def.line - 1, 0);
+			const defCol = Math.max((def.column || 1) - 1, 0);
+
+			// Cross-module: map database path to workspace file URI
+			let targetUri = this.uri;
+			if (def.uri && settings.path) {
+				const dbPath: string = def.uri;
+				const dbRoot: string = settings.path;
+				if (dbPath.startsWith(dbRoot)) {
+					const relModulePath = dbPath.substring(dbRoot.length);
+					const currentFilePath = URI.parse(this.uri).fsPath;
+					const workspaceRoot = currentFilePath.substring(0,
+						currentFilePath.length - relPath.length - path.basename(currentFilePath).length);
+					const targetPath = path.join(workspaceRoot, relModulePath);
+					targetUri = URI.file(targetPath).toString();
+				}
+			}
+
+			return {
+				uri: targetUri,
+				range: Range.create(defLine, defCol, defLine, defCol)
+			};
 		} catch (error) {
 			this.status(false, settings);
 			return null;
 		}
 	}
 
-	async getHover(position: Position, relPath: string, settings: ServerSettings): Promise<Hover | null> {
+	async getHover(position: Position, relPath: string, textDocument: TextDocument, settings: ServerSettings): Promise<Hover | null> {
 		if (!this.ast) {
 			return null;
 		}
+		// Try local symbol lookup first (no roundtrip)
 		const signature = this.getSignatureFromPosition(position);
 		if (signature) {
 			const symbol = this.symbolsMap.get(`${signature.name}#${signature.arity}`);
@@ -178,52 +159,45 @@ export class AnalyzedDocument {
 						value: md.join('\n\n')
 					}
 				};
-			} else {
-				return this.getHoverRemote(signature, relPath, settings);
 			}
+			// Fall back to server-side hover
+			return this.getHoverRemote(textDocument, position, relPath, settings);
 		}
 		return null;
 	}
 
-	private async getHoverRemote(signature: any, relPath: string, settings: ServerSettings): Promise<Hover | null> {
-		const params = this.getParameters(signature, relPath, settings);
+	private async getHoverRemote(textDocument: TextDocument, position: Position, relPath: string, settings: ServerSettings): Promise<Hover | null> {
 		try {
-			const options = this.getOptions(params, settings);
-			const response = await axios.get(options.uri, {
+			// lang:* / cursor:* expects 1-indexed line/column
+			const response = await axios.post(`${settings.uri}/apps/existdb-openapi/api/langservice/hover`, {
+				query: textDocument.getText(),
+				line: position.line + 1,
+				column: position.character + 1,
+				"module-load-path": `${settings.path}/${relPath}`
+			}, {
 				auth: {
 					username: settings.user,
 					password: settings.password
 				},
-				params: options.qs,
-				responseType: 'text'
+				headers: { "Content-Type": "application/json" },
+				responseType: 'json'
 			});
-			
+
 			if (response.status !== 200) {
 				this.status(false, settings);
 				return null;
 			}
-			
+
 			this.status(true, settings);
-			const json = JSON.parse(response.data);
-			if (json.length == 0) {
-				this.logger(`hover: no description found for ${params.signature}`, 'info');
+			const hover = response.data;
+			if (!hover || !hover.contents) {
 				return null;
 			}
-			
-			const desc = json[0];
-			const md = [`**${desc.text}** as **${desc.leftLabel}**`];
-			if (desc.description) {
-				md.push(desc.description);
-			}
-			if (desc.arguments && desc.arguments.length > 0) {
-				desc.arguments.forEach((arg: any) => {
-					md.push(`**\$${arg.name}** *${arg.type}* ${arg.description}`);
-				});
-			}
+
 			return {
 				contents: {
 					kind: MarkupKind.Markdown,
-					value: md.join('\n\n')
+					value: hover.contents
 				}
 			};
 		} catch (error) {
@@ -232,58 +206,40 @@ export class AnalyzedDocument {
 		}
 	}
 
-	private getParameters(signature: any, relPath: string, settings: ServerSettings) {
-		let imports: any;
-		const prefix = signature.name.split(':');
-		if (prefix.length === 2) {
-			const imp = this.imports.get(prefix[0]);
-			if (imp) {
-				imports = [imp];
-			}
-		}
-		if (!imports) {
-			imports = this.imports.values();
-		}
-		const params = this.resolveImports(imports, false);
-		params.base = `${settings.path}/${relPath}`;
-		params.signature = `${signature.name}#${signature.arity}`;
-		return params;
-	}
-
-	getCompletions(prefix: string | null, relPath: string, settings: ServerSettings): Promise<CompletionItem[] | ResponseError<any>> {
-		const params = this.resolveImports(this.imports.values(), false);
-		params.base = `${settings.path}/${relPath}`;
+	getCompletions(text: string, prefix: string | null, relPath: string, settings: ServerSettings): Promise<CompletionItem[] | ResponseError<any>> {
+		const body: any = {
+			query: text,
+			"module-load-path": `${settings.path}/${relPath}`
+		};
 		if (prefix) {
-			params.prefix = prefix;
+			body.prefix = prefix;
 		}
-		const options = this.getOptions(params, settings);
-		return axios.get(options.uri, {
+		return axios.post(`${settings.uri}/apps/existdb-openapi/api/langservice/completions`, body, {
 			auth: {
 				username: settings.user,
 				password: settings.password
 			},
-			params: options.qs,
-			responseType: 'text'
+			headers: { "Content-Type": "application/json" },
+			responseType: 'json'
 		}).then(response => {
 			if (response.status !== 200) {
 				this.status(false, settings);
 				throw new Error(`Unexpected status code: ${response.status}`);
 			}
 			this.status(true, settings);
-			const json = JSON.parse(response.data);
-			const symbols: any[] = [];
-			json.forEach((item: { text: string; snippet: string; type: string; name: string; description: string; }) => {
+			const items: any[] = response.data;
+			const remoteCompletions = items.map((item: any) => {
 				const symbol: Symbol = {
-					signature: item.text,
-					type: item.type,
-					snippet: item.snippet.replace(/\:\$/g, ':\\\$'),
-					name: item.name,
-					documentation: item.description
+					signature: item.detail || item.label,
+					type: item.kind === 'function' ? 'function' : 'variable',
+					snippet: item.insertText || item.label,
+					name: item.label,
+					documentation: item.documentation
 				};
-				symbols.push(symbol);
 				this.symbolsMap.set(symbol.name, symbol);
+				return symbol;
 			});
-			return this.mapCompletions(this.localSymbols).concat(this.mapCompletions(symbols));
+			return this.mapCompletions(this.localSymbols).concat(this.mapCompletions(remoteCompletions));
 		}).catch(error => {
 			this.status(false, settings);
 			return new ResponseError(ErrorCodes.InvalidRequest, error);
@@ -294,6 +250,69 @@ export class AnalyzedDocument {
 		return this.mapDocumentSymbols(this.localSymbols, textDocument);
 	}
 
+	/**
+	 * Cursor-based query execution via cursor:eval().
+	 * Returns a cursor handle, total item count, elapsed time, and the first page of results.
+	 */
+	async evalQuery(query: string, settings: ServerSettings, relPath: string, pageSize: number = 100, serializationOptions?: Record<string, string>): Promise<any> {
+		const output = this.getOutputMode(query);
+		const moduleLoadPath = `${settings.path}/${relPath}`;
+		this.logger(`Eval query with output mode: ${output}, path: ${moduleLoadPath}`);
+		// POST /api/query — server-side maps to cursor:eval and returns { cursor, items, elapsed }
+		const response = await axios.post(`${settings.uri}/apps/existdb-openapi/api/query`, {
+			query,
+			"module-load-path": moduleLoadPath
+		}, {
+			auth: { username: settings.user, password: settings.password },
+			headers: { "Content-Type": "application/json" },
+			responseType: 'json'
+		});
+		const { cursor, items, elapsed } = response.data;
+		// Fetch first page immediately with serialization options
+		const results = await this.fetchResults(cursor, 1, pageSize, settings, serializationOptions);
+		return {
+			output,
+			cursor,
+			hits: items,
+			elapsed,
+			results
+		};
+	}
+
+	/**
+	 * Fetch a page of results from an open cursor via cursor:fetch().
+	 * Serialization options (method, indent, highlight-matches) are forwarded to the server.
+	 */
+	async fetchResults(cursor: string, start: number, count: number, settings: ServerSettings, serializationOptions?: Record<string, string>): Promise<any[]> {
+		// GET /api/query/{id}/results — server-side maps to cursor:fetch
+		const params: Record<string, string> = { start: String(start), count: String(count) };
+		if (serializationOptions) {
+			Object.assign(params, serializationOptions);
+		}
+		const response = await axios.get(`${settings.uri}/apps/existdb-openapi/api/query/${encodeURIComponent(cursor)}/results`, {
+			params,
+			auth: { username: settings.user, password: settings.password },
+			responseType: 'json'
+		});
+		return response.data;
+	}
+
+	/**
+	 * Close a server-side cursor via cursor:close().
+	 */
+	async closeCursor(cursor: string, settings: ServerSettings): Promise<boolean> {
+		// DELETE /api/query/{id} — server-side maps to cursor:close
+		const response = await axios.delete(`${settings.uri}/apps/existdb-openapi/api/query/${encodeURIComponent(cursor)}`, {
+			auth: { username: settings.user, password: settings.password },
+			responseType: 'json'
+		});
+		return response.data?.closed === true;
+	}
+
+	/**
+	 * Legacy execution path via atom-editor endpoint.
+	 * Used as fallback when cursor:eval is not available.
+	 */
 	executeQuery(query: string, settings: ServerSettings, relPath: string): Promise<any> {
 		const params = {
 			output: this.getOutputMode(query),
@@ -301,7 +320,7 @@ export class AnalyzedDocument {
 			count: '100',
 			base: `${settings.path}/${relPath}`
 		};
-		this.logger(`Execute query with output mode: ${params.output}, path: ${params.base}`);
+		this.logger(`Execute query (legacy) with output mode: ${params.output}, path: ${params.base}`);
 		return axios.post(`${settings.uri}/apps/atom-editor/execute`, new URLSearchParams(params).toString(), {
 			auth: {
 				username: settings.user,
@@ -332,13 +351,6 @@ export class AnalyzedDocument {
 			return match[1];
 		}
 		return 'adaptive';
-	}
-
-	private getOptions(params: any, settings: ServerSettings, target: string = 'atom-autocomplete.xql') {
-		return {
-			uri: `${settings.uri}/apps/atom-editor/${target}`,
-			qs: params
-		};
 	}
 
 	private mapCompletions(symbols: any[]): CompletionItem[] {
@@ -396,7 +408,6 @@ export class AnalyzedDocument {
 				}
 				const arity = args.length;
 				const signature = name + "(" + args + ")";
-				// const status = funcDef[2].indexOf("%private") == -1 ? "private" : 'public';
 				let location;
 				if (lineCount) {
 					const line = AnalyzedDocument.getLine(text, offset);
@@ -504,53 +515,6 @@ export class AnalyzedDocument {
 			}
 		}
 		return newlines;
-	}
-
-	private parseImports(text: string) {
-		this.imports.clear();
-		let match = importRe.exec(text);
-
-		while (match != null) {
-			if (match[1]) {
-				const imp = match[1];
-				match = moduleRe.exec(imp);
-				if (match && match.length === 4) {
-					const isJava = match[3].substring(0, 5) == "java:";
-					const importData = {
-						prefix: match[1],
-						uri: match[2],
-						source: match[3],
-						isJava: isJava
-					};
-					this.imports.set(importData.prefix, importData);
-				}
-			}
-			match = importRe.exec(text);
-		}
-	}
-
-	private resolveImports(imports: IterableIterator<Import>, includeJava = true): {
-		mprefix: string[], uri: string[], source: string[], base: string, prefix?: string,
-		signature?: string
-	} {
-		const prefixes: string[] = [];
-		const uris: string[] = [];
-		const sources: string[] = [];
-		for (let imp of imports) {
-			if (!imp.isJava || includeJava) {
-				prefixes.push(imp.prefix);
-				uris.push(imp.uri);
-				if (imp.source) {
-					sources.push(imp.source);
-				}
-			}
-		}
-		return {
-			mprefix: prefixes,
-			uri: uris,
-			source: sources,
-			base: ''
-		};
 	}
 
 	private getSignatureFromPosition(position: Position): any | undefined {
