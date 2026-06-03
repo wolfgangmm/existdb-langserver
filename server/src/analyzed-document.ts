@@ -85,11 +85,12 @@ export class AnalyzedDocument {
 
 	private async gotoDefinitionRemote(textDocument: TextDocument, position: Position, relPath: string, settings: ServerSettings): Promise<Location | null> {
 		try {
-			// lang:* / cursor:* expects 1-indexed line/column
+			// existdb-openapi /api/langservice/* expects `expression` (not `query`)
+			// and 0-indexed line/column matching the LSP Position convention.
 			const response = await axios.post(`${settings.uri}/apps/existdb-openapi/api/langservice/definition`, {
-				query: textDocument.getText(),
-				line: position.line + 1,
-				column: position.character + 1,
+				expression: textDocument.getText(),
+				line: position.line,
+				column: position.character,
 				"module-load-path": `${settings.path}/${relPath}`
 			}, {
 				auth: {
@@ -111,9 +112,9 @@ export class AnalyzedDocument {
 				return null;
 			}
 
-			// lang:* / cursor:* returns 1-indexed; convert to 0-indexed for LSP protocol
-			const defLine = Math.max(def.line - 1, 0);
-			const defCol = Math.max((def.column || 1) - 1, 0);
+			// existdb-openapi returns 0-indexed line/column, same as LSP — pass through.
+			const defLine = Math.max(def.line, 0);
+			const defCol = Math.max(def.column || 0, 0);
 
 			// Cross-module: map database path to workspace file URI
 			let targetUri = this.uri;
@@ -168,11 +169,12 @@ export class AnalyzedDocument {
 
 	private async getHoverRemote(textDocument: TextDocument, position: Position, relPath: string, settings: ServerSettings): Promise<Hover | null> {
 		try {
-			// lang:* / cursor:* expects 1-indexed line/column
+			// existdb-openapi /api/langservice/* expects `expression` (not `query`)
+			// and 0-indexed line/column matching the LSP Position convention.
 			const response = await axios.post(`${settings.uri}/apps/existdb-openapi/api/langservice/hover`, {
-				query: textDocument.getText(),
-				line: position.line + 1,
-				column: position.character + 1,
+				expression: textDocument.getText(),
+				line: position.line,
+				column: position.character,
 				"module-load-path": `${settings.path}/${relPath}`
 			}, {
 				auth: {
@@ -208,7 +210,7 @@ export class AnalyzedDocument {
 
 	getCompletions(text: string, prefix: string | null, relPath: string, settings: ServerSettings): Promise<CompletionItem[] | ResponseError<any>> {
 		const body: any = {
-			query: text,
+			expression: text,
 			"module-load-path": `${settings.path}/${relPath}`
 		};
 		if (prefix) {

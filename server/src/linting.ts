@@ -35,7 +35,7 @@ export function lintDocument(text: string, relPath: string, document: AnalyzedDo
 
 function serverLint(text: String, settings: ServerSettings, relPath: string, document: AnalyzedDocument): Promise<AnalyzedDocument | ResponseError<any>> {
 	return axios.post(`${settings.uri}/apps/existdb-openapi/api/langservice/diagnostics`, {
-		query: text,
+		expression: text,
 		"module-load-path": `${settings.path}/${relPath}`
 	}, {
 		auth: {
@@ -55,9 +55,9 @@ function serverLint(text: String, settings: ServerSettings, relPath: string, doc
 		const diagnostics: any[] = response.data;
 		if (Array.isArray(diagnostics)) {
 			for (const d of diagnostics) {
-				// lang:diagnostics returns 1-indexed lines; LSP protocol uses 0-indexed
-			const line = Math.max(d.line - 1, 0);
-			const column = Math.max(d.column - 1, 0);
+				// existdb-openapi returns 0-indexed line/column, same as LSP — pass through.
+				const line = Math.max(d.line || 0, 0);
+				const column = Math.max(d.column || 0, 0);
 			const diagnostic: Diagnostic = {
 					severity: mapSeverity(d.severity),
 					range: Range.create(line, column, line, column),

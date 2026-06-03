@@ -475,7 +475,7 @@ connection.onDocumentSymbol(async (params: DocumentSymbolParams): Promise<Symbol
 	// Try server-side symbols for richer results (return types, parameter types)
 	try {
 		const response = await axios.post(`${settings.uri}/apps/existdb-openapi/api/langservice/symbols`, {
-			query: textDocument.getText(),
+			expression: textDocument.getText(),
 			"module-load-path": `${settings.path}/${relPath}`
 		}, {
 			auth: { username: settings.user, password: settings.password },
@@ -541,10 +541,12 @@ connection.onReferences(async (params: ReferenceParams): Promise<Location[]> => 
 	const relPath = getRelativePath(uri);
 
 	try {
+		// existdb-openapi /api/langservice/* expects `expression` (not `query`)
+		// and 0-indexed line/column matching the LSP Position convention.
 		const response = await axios.post(`${settings.uri}/apps/existdb-openapi/api/langservice/references`, {
-			query: textDocument.getText(),
-			line: params.position.line + 1,
-			column: params.position.character + 1,
+			expression: textDocument.getText(),
+			line: params.position.line,
+			column: params.position.character,
 			"module-load-path": `${settings.path}/${relPath}`
 		}, {
 			auth: { username: settings.user, password: settings.password },
@@ -553,13 +555,14 @@ connection.onReferences(async (params: ReferenceParams): Promise<Location[]> => 
 		});
 
 		if (response.status === 200 && Array.isArray(response.data)) {
+			// existdb-openapi returns 0-indexed line/column, same as LSP — pass through.
 			return response.data.map((ref: any) => ({
 				uri,
 				range: Range.create(
-					Math.max(ref.line - 1, 0),
-					Math.max((ref.column || 1) - 1, 0),
-					Math.max(ref.line - 1, 0),
-					Math.max((ref.column || 1) - 1, 0)
+					Math.max(ref.line, 0),
+					Math.max(ref.column || 0, 0),
+					Math.max(ref.line, 0),
+					Math.max(ref.column || 0, 0)
 				)
 			}));
 		}
@@ -668,7 +671,7 @@ connection.languages.semanticTokens.on(async (params: SemanticTokensParams) => {
 
 	try {
 		const response = await axios.post(`${settings.uri}/apps/existdb-openapi/api/langservice/symbols`, {
-			query: text,
+			expression: text,
 			"module-load-path": `${settings.path}/${relPath}`
 		}, {
 			auth: { username: settings.user, password: settings.password },
