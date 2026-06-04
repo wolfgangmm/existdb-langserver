@@ -8,7 +8,7 @@ import {
 	DidChangeConfigurationNotification, TextDocumentPositionParams, CompletionItem,
 	WorkspaceFolder, ResponseError, DocumentSymbolParams,
 	SymbolInformation, Hover,
-	Location, ConfigurationItem
+	Location, ConfigurationItem, ReferenceParams
 } from 'vscode-languageserver/node';
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from 'vscode-uri';
@@ -16,6 +16,10 @@ import { ServerSettings } from './settings';
 import { AnalyzedDocument } from './analyzed-document';
 import { checkServer, installXar, readWorkspaceConfig, createWorkspaceConfig } from './utils';
 import { lintDocument } from './linting';
+import { detectCapabilities, ServerCapabilities } from './services/capabilities';
+import { QueryExecutor } from './services/query-executor';
+import { AtomEditorQueryExecutor } from './services/atom-editor-query-executor';
+import { OpenApiQueryExecutor } from './services/openapi-query-executor';
 
 const defaultSettings: ServerSettings = {
 	uri: 'http://localhost:8080/exist',
@@ -46,10 +50,17 @@ let resourcesDir: string;
 let hasConfigurationCapability: boolean = false;
 let hasWorkspaceFolderCapability: boolean = false;
 
+// Server-side capabilities detected at connect time — see
+// services/capabilities.ts. Determines whether we route through the
+// atom-editor (v6) or existdb-openapi (v7+) implementations.
+let serverCapabilities: ServerCapabilities | null = null;
+let queryExecutor: QueryExecutor | null = null;
+
 function getAnalyzedDocument(textDocument: TextDocument) {
 	let document = analyzedDocuments.get(textDocument.uri);
 	if (!document) {
 		document = new AnalyzedDocument(textDocument.uri, textDocument.getText(), log, reportStatus);
+		if (serverCapabilities) document.service = serverCapabilities.languageService;
 		analyzedDocuments.set(textDocument.uri, document);
 	}
 	return document;
@@ -157,31 +168,89 @@ connection.onInitialize((params) => {
 			},
 			documentSymbolProvider: true,
 			definitionProvider: true,
-			hoverProvider: true
+			hoverProvider: true,
+			// v7-only features. The handlers below check the active service's
+			// optional methods; when the server is v6 (atom-editor) and the
+			// optional method is undefined, the handlers return [] / null —
+			// VSCode then either doesn't show the affordance (e.g., no "Find
+			// References" menu population) or treats it as "no result".
+			referencesProvider: true
 		}
 	};
 });
 
 async function checkServerConnection() {
-	if (resourcesDir) {
-		const settings = await getSettings();
-		log(`Checking connection to ${settings.uri}`);
-		reportStatus('Connecting ...', settings);
-		checkServer(settings, resourcesDir).then(response => {
-			if (response) {
-				log(`Sending existdb/install notification ${response.xar.path}`);
-				connection.sendNotification('existdb/install', [response.message, response.xar]);
-			}
-			if (workspaceName !== noWorkspace) {
-				log(`Connection ok`);
-				reportStatus(workspaceName, settings);
-			}
-		},
-		(message) => {
-			log(`Connection failed: ${message}`);
-			connection.window.showWarningMessage(`Connection failed: ${message}`);
-			connection.sendNotification('existdb/status', ['$(database) Disonnected', settings.uri]);
-		});
+	if (!resourcesDir) return;
+	const settings = await getSettings();
+	log(`Checking connection to ${settings.uri} (user: ${settings.user || '(anon)'})`);
+	reportStatus('Connecting ...', settings);
+
+	// Detect which server-side language service is available — existdb-openapi
+	// (v7+) or atom-editor-support (v6). The result is stored at workspace level
+	// and propagated to every AnalyzedDocument.
+	const caps = await detectCapabilities(settings, log);
+	serverCapabilities = caps;
+	queryExecutor = caps.detection.kind === 'openapi' && caps.hasCursorExecution
+		? new OpenApiQueryExecutor(log)
+		: new AtomEditorQueryExecutor(log);
+
+	// Propagate to already-open documents (reconnect case).
+	for (const doc of analyzedDocuments.values()) {
+		doc.service = caps.languageService;
+	}
+
+	logDetection(caps, settings);
+
+	if (caps.detection.kind === 'error') {
+		const reason = caps.detection.reason;
+		const status = caps.detection.status;
+		log(`Connection failed: ${reason}`, 'warn');
+		if (status === 401) {
+			connection.window.showWarningMessage(`eXist authentication failed (HTTP 401): ${reason}. Check your user/password in settings.`);
+		} else {
+			connection.window.showWarningMessage(`Connection to eXist failed: ${reason}`);
+		}
+		connection.sendNotification('existdb/status', ['$(database) Disonnected', settings.uri]);
+		return;
+	}
+
+	if (caps.detection.kind === 'openapi') {
+		// Modern path — skip the atom-editor helper-XAR prompt entirely.
+		if (workspaceName !== noWorkspace) reportStatus(workspaceName, settings);
+		return;
+	}
+
+	// v6 path: ensure the atom-editor-support XAR is installed; prompt if not.
+	checkServer(settings, resourcesDir).then(response => {
+		if (response) {
+			log(`atom-editor helper XAR check: ${response.message}`);
+			log(`Sending existdb/install notification ${response.xar.path}`);
+			connection.sendNotification('existdb/install', [response.message, response.xar]);
+		}
+		if (workspaceName !== noWorkspace) {
+			log(`Connection ok`);
+			reportStatus(workspaceName, settings);
+		}
+	}, (message) => {
+		log(`Connection failed: ${message}`, 'warn');
+		connection.window.showWarningMessage(`Connection failed: ${message}`);
+		connection.sendNotification('existdb/status', ['$(database) Disonnected', settings.uri]);
+	});
+}
+
+function logDetection(caps: ServerCapabilities, settings: ServerSettings) {
+	switch (caps.detection.kind) {
+		case 'openapi':
+			log(`GET /apps/existdb-openapi/api/langservice/capabilities → 200`);
+			log(`Using ${caps.languageService.label}; cursor:eval ${caps.hasCursorExecution ? 'available' : 'not available'}`);
+			break;
+		case 'atom-editor':
+			log(`existdb-openapi not present — falling back to ${caps.languageService.label}`);
+			log(`New features (references, semantic tokens, cursor pagination) unavailable on this server`);
+			break;
+		case 'error':
+			log(`Capability detection failed${caps.detection.status ? ` (HTTP ${caps.detection.status})` : ''}: ${caps.detection.reason}`, 'warn');
+			break;
 	}
 }
 
@@ -269,18 +338,16 @@ connection.onExecuteCommand(params => {
 });
 
 async function executeQuery(args: any[] | undefined): Promise<any> {
-	if (args) {
-		const [uri, text] = args;
-		const settings = await getSettings();
-		let document = analyzedDocuments.get(uri);
-		if (!document) {
-			document = new AnalyzedDocument(uri, text, log, reportStatus);
-			analyzedDocuments.set(uri, document);
-		}
-		const relPath = getRelativePath(uri.toString());
-		return document.executeQuery(text, settings, relPath);
+	if (!args || !queryExecutor) return [];
+	const [uri, text] = args;
+	const settings = await getSettings();
+	const relPath = getRelativePath(uri.toString());
+	try {
+		return await queryExecutor.execute(text, settings, relPath);
+	} catch (e: any) {
+		log(`Execute query failed: ${e?.message || e}`, 'warn');
+		throw e;
 	}
-	return [];
 }
 
 async function lint(textDocument: TextDocument) {
@@ -289,6 +356,7 @@ async function lint(textDocument: TextDocument) {
 	let document = analyzedDocuments.get(uri);
 	if (!document) {
 		document = new AnalyzedDocument(uri, text, log, reportStatus);
+		if (serverCapabilities) document.service = serverCapabilities.languageService;
 		analyzedDocuments.set(uri, document);
 	} else {
 		document.analyze(text);
@@ -298,7 +366,7 @@ async function lint(textDocument: TextDocument) {
 		settings.path = workspaceFolder ? `/db/apps/${workspaceName}` : '/db';
 	}
 	const relPath = getRelativePath(uri);
-	const resp = await lintDocument(text, relPath, document, settings);
+	await lintDocument(text, relPath, document, settings);
 	// Send the computed diagnostics to VSCode.
 	connection.sendDiagnostics({ uri: uri, diagnostics: document.diagnostics });
 }
@@ -334,28 +402,67 @@ async function autocomplete(position: TextDocumentPositionParams): Promise<Compl
 	}
 	const prefix = text.substring(start, offset);
 	const relPath = getRelativePath(uri);
-	const resp = await document.getCompletions(prefix, relPath, settings);
+	const resp = await document.getCompletions(text, prefix, relPath, settings);
 	if (resp instanceof ResponseError) {
 		connection.console.log(`[${workspaceName}] ${resp}`);
-	} else {
-		return resp;
+		return [];
 	}
-
-	return [];
+	return resp;
 }
 
 connection.onCompletionResolve((item: CompletionItem): CompletionItem => {
 	return item;
 });
 
-connection.onDocumentSymbol((params: DocumentSymbolParams): SymbolInformation[] => {
+connection.onDocumentSymbol(async (params: DocumentSymbolParams): Promise<SymbolInformation[]> => {
 	const uri = params.textDocument.uri;
 	const textDocument = documents.get(uri);
 	if (!textDocument) {
 		return [];
 	}
 	const document = getAnalyzedDocument(textDocument);
+	// v7-only: ask the server for a richer symbols list (return types,
+	// parameter types). If the active service doesn't implement it, fall
+	// back to the local AST.
+	const svc = serverCapabilities?.languageService;
+	if (svc?.documentSymbols) {
+		const settings = await getSettings();
+		const relPath = getRelativePath(uri);
+		try {
+			const remote = await svc.documentSymbols(textDocument.getText(), relPath, settings);
+			if (remote.length > 0) {
+				return remote.map(s => ({ ...s, location: { ...s.location, uri } }));
+			}
+		} catch (e) {
+			// fall through to local
+		}
+	}
 	return document.getDocumentSymbols(textDocument);
+});
+
+connection.onReferences(async (params: ReferenceParams): Promise<Location[]> => {
+	const uri = params.textDocument.uri;
+	const textDocument = documents.get(uri);
+	if (!textDocument) return [];
+	const svc = serverCapabilities?.languageService;
+	if (!svc?.references) return [];
+	const document = getAnalyzedDocument(textDocument);
+	const settings = await getSettings();
+	const relPath = getRelativePath(uri);
+	const signature = document.getSignatureFromPosition(params.position);
+	try {
+		return await svc.references({
+			textDocument,
+			position: params.position,
+			signature: signature || null,
+			imports: document.imports,
+			relPath,
+			settings,
+			uri
+		});
+	} catch (e) {
+		return [];
+	}
 });
 
 connection.onHover((params: TextDocumentPositionParams): Promise<Hover | null> => {
@@ -370,7 +477,7 @@ async function hover(uri: string, position: Position) {
 	const document = getAnalyzedDocument(textDocument);
 	const relPath = getRelativePath(uri);
 	const settings = await getSettings();
-	return document.getHover(position, relPath, settings);
+	return document.getHover(position, relPath, textDocument, settings);
 }
 
 connection.onDefinition((params: TextDocumentPositionParams): Promise<Location | null> => {

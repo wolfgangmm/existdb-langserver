@@ -10,7 +10,7 @@
         "vscode:prepublish": "npm run clean && npm run webpack",
         "test-compile": "tsc -p ./",
         "watch": "tsc -b -w",
-        "test": "npm run test-compile && mocha",
+        "test": "TS_NODE_PROJECT=test/tsconfig.json mocha",
         "postinstall": "cd client && npm install && cd ../server && npm install && cd ../sync && npm install && cd ..",
         "webpack": "cd server && npm run webpack && cd ../client && npm run webpack && cd ../sync && npm run webpack",
         "webpack-dev": "cd server && npm run webpack-dev && cd ../client && npm run webpack-dev && cd ../sync && npm run webpack-dev",
@@ -62,6 +62,16 @@
             {
                 "command": "existdb.deploy",
                 "title": "Deploy package to the database",
+                "category": "eXist-db"
+            },
+            {
+                "command": "existdb.loadMoreResults",
+                "title": "Load more query results",
+                "category": "eXist-db"
+            },
+            {
+                "command": "existdb.setOutputFormat",
+                "title": "Set Output Format",
                 "category": "eXist-db"
             }
         ],
@@ -151,6 +161,25 @@
                     "type": "string",
                     "default": null,
                     "description": "Path to the app collection within eXist"
+                },
+                "existdb.query.serializationMethod": {
+                    "scope": "resource",
+                    "type": "string",
+                    "default": "adaptive",
+                    "enum": ["adaptive", "xml", "json", "text"],
+                    "enumDescriptions": [
+                        "Adaptive output (XQuery default)",
+                        "XML serialization",
+                        "JSON serialization",
+                        "Plain text"
+                    ],
+                    "description": "Default serialization method for query results"
+                },
+                "existdb.query.indent": {
+                    "scope": "resource",
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Indent query results for readability"
                 }
             }
         },
@@ -187,10 +216,13 @@
     "devDependencies": {
         "@types/mocha": "^9.1.1",
         "@types/node": "^18.7.9",
+        "@types/sinon": "^21.0.0",
         "assert": "^2.0.0",
+        "axios": "^1.13.6",
         "copy-webpack-plugin": "^11.0.0",
         "mocha": "^10.0.0",
         "rimraf": "^3.0.2",
+        "sinon": "^21.0.3",
         "ts-loader": "^9.3.1",
         "ts-node": "^10.9.1",
         "tslint": "^6.1.3",

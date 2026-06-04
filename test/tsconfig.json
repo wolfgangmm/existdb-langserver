@@ -1,0 +1,23 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"lib": ["ES2022"],
+		"module": "commonjs",
+		"moduleResolution": "node",
+		"sourceMap": true,
+		"strict": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true,
+		"rootDir": "..",
+		"outDir": "../out-test"
+	},
+	"include": [
+		"./**/*.spec.ts",
+		"../server/src/**/*.ts"
+	],
+	"exclude": [
+		"../node_modules",
+		"../server/node_modules"
+	]
+}
