@@ -1,105 +1,60 @@
 /**
- * Support for linting XQuery documents.
- * 
- * @author Wolfgang Meier
+ * Linting / diagnostics for XQuery documents.
+ *
+ * Two things happen on every change:
+ *
+ *  1. Local parse via eXide's REx-generated XQuery 3.1 parser — produces
+ *     an AST stored on the document for fast cursor-position lookups
+ *     (hover, go-to-definition). Parse errors here are swallowed; the
+ *     server-side diagnostics call below is the source of truth.
+ *  2. Remote diagnostics call via the active LanguageService strategy
+ *     — atom-editor's `compile.xql` on v6, openapi's `/api/langservice/
+ *     diagnostics` on v7. The two return different things (single error
+ *     from `util:compile-query` on v6, structured multi-error JSON on v7);
+ *     both shapes are normalized into Diagnostic[] inside the service.
+ *
+ * @author Wolfgang Meier (original, atom-editor path); refactored to
+ * route diagnostics through the LanguageService strategy.
  */
-import { Diagnostic, DiagnosticSeverity, Range, ResponseError, ErrorCodes } from 'vscode-languageserver';
+
+import { ResponseError } from 'vscode-languageserver';
 import { ServerSettings } from './settings';
 import { AnalyzedDocument } from './analyzed-document';
-import axios from 'axios';
 
-// eXide's REx-generated XQuery 3.1 parser + adapter that emits an AST shape
-// compatible with what xqlint's JSONParseTreeHandler used to produce. The
-// langserver only needs local symbol lookup (used by hover / go-to-definition
-// when a server roundtrip isn't worth it); the adapter's normalized AST is
-// what server/src/ast.ts traverses.
-//
+// eXide's REx-generated XQuery 3.1 parser + adapter — see
+// services/atom-editor-language-service.ts and the comment in
+// server/src/parser/adapter.js for the full story.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const XQueryParser = require('./parser/XQueryParser');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const rexParserAdapter = require('./parser/adapter');
 
-export function lintDocument(text: string, relPath: string, document: AnalyzedDocument, settings: ServerSettings): Promise<AnalyzedDocument | ResponseError<any>> {
+export async function lintDocument(text: string, relPath: string, document: AnalyzedDocument, settings: ServerSettings): Promise<AnalyzedDocument | ResponseError<any>> {
 	document.diagnostics = [];
-	if (text.length == 0) {
-		return Promise.resolve(document);
+	if (text.length === 0) {
+		return document;
 	}
 	try {
-		xqlint(document.uri, text, document);
+		buildLocalAst(text, document);
 	} catch (e) {
-		// ignore
+		// ignore parse errors — server-side diagnostics handle reporting
 	}
-	return serverLint(text, settings, relPath, document);
-
-}
-
-function serverLint(text: String, settings: ServerSettings, relPath: string, document: AnalyzedDocument): Promise<AnalyzedDocument | ResponseError<any>> {
-	return axios.put(`${settings.uri}/apps/atom-editor/compile.xql`, text, {
-		auth: {
-			username: settings.user,
-			password: settings.password
-		},
-		headers: {
-			"X-BasePath": `${settings.path}/${relPath}`,
-			"Content-Type": "application/octet-stream"
-		},
-		responseType: 'text'
-	}).then(response => {
-		if (response.status !== 200) {
-			document.status(false, settings);
-			return document;
-		}
+	if (!document.service) {
+		// No remote available yet (capability detection in flight, or
+		// connection failed); return what local analysis produced.
+		return document;
+	}
+	try {
+		const diagnostics = await document.service.diagnostics(text, relPath, settings);
+		document.diagnostics = diagnostics;
 		document.status(true, settings);
-		const json = JSON.parse(response.data);
-		if (json.result !== 'pass') {
-			const error = parseErrorMessage(json.error);
-			if (!error.line) {
-				document.status(false, settings);
-				return document;
-			} else {
-				const diagnostic: Diagnostic = {
-					severity: DiagnosticSeverity.Error,
-					range: Range.create(error.line, error.column, error.line, error.column),
-					message: error.msg,
-					source: 'xquery'
-				};
-				document.diagnostics.push(diagnostic);
-			}
-		}
-		return document;
-	}).catch(error => {
+	} catch (e) {
 		document.status(false, settings);
-		return document;
-	});
+	}
+	return document;
 }
 
-function parseErrorMessage(error: any) {
-	let msg;
-	if (error.line) {
-		msg = error["#text"];
-	} else {
-		msg = error;
-	}
-
-	let str = /.*line:?\s*(\d+),\s*column:?\s*(\d+)/i.exec(msg);
-	let line = 0;
-	let column = 0;
-	if (str && str.length === 3) {
-		line = parseInt(str[1]) - 1;
-		column = parseInt(str[2]) - 1;
-	} else {
-		line = parseInt(error.line) - 1;
-		column = parseInt(error.column) - 1;
-	}
-
-	return { line: Math.max(line, 0), column: Math.max(column, 0), msg: msg };
-}
-
-function xqlint(uri: String, text: String, document: AnalyzedDocument): void {
-	// Build an AST for local symbol lookup (hover, go-to-definition).
-	// Parse errors are intentionally ignored here — atom-editor's
-	// compile.xql handles error checking on the server. We just need a
-	// best-effort AST whenever the source is parseable.
+function buildLocalAst(text: string, document: AnalyzedDocument): void {
 	const result = rexParserAdapter.parseXQuery(text, XQueryParser);
 	document.ast = result.ast;
 }

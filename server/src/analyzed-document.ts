@@ -1,46 +1,32 @@
-import { Diagnostic, CompletionItem, CompletionItemKind, InsertTextFormat, ResponseError, ErrorCodes, SymbolInformation, TextDocument, Range, Position, Hover, MarkupKind, Location } from 'vscode-languageserver';
+/**
+ * Per-document analysis state: the local AST (for cursor-position lookups
+ * without a server roundtrip), the local symbol table extracted from the
+ * buffer text via regex, and the parsed `import module namespace` map
+ * used by the v6 atom-editor service for client-side import resolution.
+ *
+ * Remote calls (hover / definition / completions / diagnostics) are
+ * delegated to a LanguageService — either AtomEditorLanguageService (v6)
+ * or OpenApiLanguageService (v7+) — selected at workspace connect time
+ * by `services/capabilities.ts`. Server-side handlers in `server.ts` use
+ * `getSignatureFromPosition` + `imports` from this class plus their own
+ * settings to build the LookupContext / CompletionContext that the
+ * service consumes; that keeps the strategy stateless.
+ *
+ * @author Wolfgang Meier (original); refactored to delegate remote calls
+ * to a LanguageService strategy when openapi support was added.
+ */
+
+import { CompletionItem, CompletionItemKind, Diagnostic, InsertTextFormat, SymbolInformation, TextDocument, Range, Position, Hover, Location } from 'vscode-languageserver';
 import { ServerSettings } from './settings';
 import { AST } from './ast';
-import axios from 'axios';
-import * as path from 'path';
-import * as fs from 'fs';
-import { URI } from 'vscode-uri';
+import { Import, Symbol, ParsedSignature } from './services/types';
+import { LanguageService, LookupContext, CompletionContext } from './services/language-service';
+import { parseImports } from './services/atom-editor-language-service';
 
 const funcDefRe = /(?:\(:~(.*?):\))?\s*declare\s+((?:%[\w\:\-]+(?:\([^\)]*\))?\s*)*function\s+([^\(]+)\()/gsm;
 const trimRe = /^[\x09\x0a\x0b\x0c\x0d\x20\xa0\u1680\u180e\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000]+|[\x09\x0a\x0b\x0c\x0d\x20\xa0\u1680\u180e\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000]+$/g;
 const paramRe = /\$[^\s]+/;
-const importRe = /(import\s+module\s+namespace\s+[^=]+\s*=\s*["'][^"']+["']\s*(?:at\s+["'][^"']+["'])?\s*;)/g;
-const moduleRe = /import\s+module\s+namespace\s+([^=\s]+)\s*=\s*["']([^"']+)["']\s*at\s+["']([^"']+)["']\s*;/;
 
-interface Import {
-	prefix: string;
-	uri: string;
-	source?: string;
-	isJava?: boolean;
-}
-
-interface Symbol {
-	signature: string;
-	type: string;
-	name: string;
-	snippet: string;
-	documentation?: string;
-	arguments?: [{
-		name: string,
-		type: string,
-		description?: string
-	}];
-	location?: {
-		start: number;
-		end: number;
-	};
-}
-
-/**
- * Holds analysis information about an open document, including diagnostics, local symbols etc.
- *
- * @author Wolfgang Meier
- */
 export class AnalyzedDocument {
 
 	uri: string;
@@ -59,6 +45,14 @@ export class AnalyzedDocument {
 
 	status: (message: boolean | string, settings?: ServerSettings) => void;
 
+	/**
+	 * The LanguageService used for remote calls. Set by server.ts after
+	 * capability detection completes. Until set, remote calls return
+	 * null / empty (the document is still locally useful for hover /
+	 * goto-def hits resolved entirely from the buffer AST).
+	 */
+	service: LanguageService | null = null;
+
 	constructor(uri: string, text: string | null = null, logger: (message: string, prio?: string) => void,
 		status: (message: boolean | string, settings?: ServerSettings) => void) {
 		this.uri = uri;
@@ -73,13 +67,12 @@ export class AnalyzedDocument {
 		this.symbolsMap.clear();
 		AnalyzedDocument.getLocalSymbols(text, false, this.symbolsMap);
 		this.localSymbols = Array.from(this.symbolsMap.values());
-		this.parseImports(text);
+		parseImports(text, this.imports);
 	}
 
 	async gotoDefinition(position: Position, relPath: string, textDocument: TextDocument, settings: ServerSettings): Promise<Location | null> {
-		if (!this.ast) {
-			return null;
-		}
+		// 1. Local AST first — symbols declared in this buffer resolve
+		//    without a server roundtrip on either v6 or v7.
 		const signature = this.getSignatureFromPosition(position);
 		if (signature) {
 			const symbol = this.symbolsMap.get(`${signature.name}#${signature.arity}`);
@@ -88,287 +81,94 @@ export class AnalyzedDocument {
 					uri: this.uri,
 					range: this.computeLocation(textDocument, symbol.location)
 				};
-			} else {
-				return this.gotoDefinitionRemote(signature, relPath, textDocument, settings);
 			}
 		}
-		return null;
-	}
-
-	private async gotoDefinitionRemote(signature: any, relPath: string, textDocument: TextDocument, settings: ServerSettings): Promise<Location | null> {
-		const params = this.getParameters(signature, relPath, settings);
+		// 2. Otherwise delegate to the active language service.
+		if (!this.service) return null;
+		const ctx = this.buildLookupContext(textDocument, position, signature, relPath, settings);
 		try {
-			const options = this.getOptions(params, settings);
-			const response = await axios.get(options.uri, {
-				auth: {
-					username: settings.user,
-					password: settings.password
-				},
-				params: options.qs,
-				responseType: 'text'
-			});
-			
-			if (response.status !== 200) {
-				this.status(false, settings);
-				return null;
-			}
-			
-			const json = JSON.parse(response.data);
-			if (json.length == 0) {
-				this.logger(`no description found for ${params.signature}`, 'info');
-				return null;
-			}
-			
-			this.status(true, settings);
-			const desc = json[0];
-			const rp = path.relative(`${settings.path}/${relPath}`, desc.path);
-			const fp = URI.parse(this.uri).fsPath;
-			const absPath = path.resolve(path.dirname(fp), rp);
-			console.log(`reading ${absPath}`);
-			
-			return new Promise((resolve) => {
-				fs.readFile(absPath, { encoding: 'utf-8' }, (err: NodeJS.ErrnoException | null, content: string | Buffer) => {
-					if (err || !content) {
-						this.logger(`failed to parse ${absPath}`, 'error');
-						resolve(null);
-						return;
-					}
-					const contentStr = typeof content === 'string' ? content : content.toString('utf-8');
-					const symbol = AnalyzedDocument.getLocalSymbol(contentStr, signature.name, signature.arity);
-					if (symbol && symbol.location) {
-						resolve({
-							uri: URI.file(absPath).toString(),
-							range: {
-								start: {
-									line: symbol.location.start,
-									character: 0
-								},
-								end: {
-									line: symbol.location.end + 1,
-									character: Number.MAX_VALUE
-								}
-							}
-						});
-					} else {
-						resolve(null);
-					}
-				});
-			});
-		} catch (error) {
+			return await this.service.definition(ctx);
+		} catch (e) {
 			this.status(false, settings);
 			return null;
 		}
 	}
 
-	async getHover(position: Position, relPath: string, settings: ServerSettings): Promise<Hover | null> {
-		if (!this.ast) {
-			return null;
-		}
+	async getHover(position: Position, relPath: string, textDocument: TextDocument, settings: ServerSettings): Promise<Hover | null> {
 		const signature = this.getSignatureFromPosition(position);
 		if (signature) {
 			const symbol = this.symbolsMap.get(`${signature.name}#${signature.arity}`);
 			if (symbol) {
 				const md = [`**${symbol.signature}**`];
-				if (symbol.documentation) {
-					md.push(symbol.documentation);
-				}
+				if (symbol.documentation) md.push(symbol.documentation);
 				return {
-					contents: {
-						kind: MarkupKind.Markdown,
-						value: md.join('\n\n')
-					}
+					contents: { kind: 'markdown', value: md.join('\n\n') } as any
 				};
-			} else {
-				return this.getHoverRemote(signature, relPath, settings);
 			}
 		}
-		return null;
-	}
-
-	private async getHoverRemote(signature: any, relPath: string, settings: ServerSettings): Promise<Hover | null> {
-		const params = this.getParameters(signature, relPath, settings);
+		if (!this.service) return null;
+		const ctx = this.buildLookupContext(textDocument, position, signature, relPath, settings);
 		try {
-			const options = this.getOptions(params, settings);
-			const response = await axios.get(options.uri, {
-				auth: {
-					username: settings.user,
-					password: settings.password
-				},
-				params: options.qs,
-				responseType: 'text'
-			});
-			
-			if (response.status !== 200) {
-				this.status(false, settings);
-				return null;
-			}
-			
-			this.status(true, settings);
-			const json = JSON.parse(response.data);
-			if (json.length == 0) {
-				this.logger(`hover: no description found for ${params.signature}`, 'info');
-				return null;
-			}
-			
-			const desc = json[0];
-			const md = [`**${desc.text}** as **${desc.leftLabel}**`];
-			if (desc.description) {
-				md.push(desc.description);
-			}
-			if (desc.arguments && desc.arguments.length > 0) {
-				desc.arguments.forEach((arg: any) => {
-					md.push(`**\$${arg.name}** *${arg.type}* ${arg.description}`);
-				});
-			}
-			return {
-				contents: {
-					kind: MarkupKind.Markdown,
-					value: md.join('\n\n')
-				}
-			};
-		} catch (error) {
+			return await this.service.hover(ctx);
+		} catch (e) {
 			this.status(false, settings);
 			return null;
 		}
 	}
 
-	private getParameters(signature: any, relPath: string, settings: ServerSettings) {
-		let imports: any;
-		const prefix = signature.name.split(':');
-		if (prefix.length === 2) {
-			const imp = this.imports.get(prefix[0]);
-			if (imp) {
-				imports = [imp];
-			}
+	async getCompletions(text: string, prefix: string | null, relPath: string, settings: ServerSettings): Promise<CompletionItem[]> {
+		if (!this.service) {
+			// No remote, fall back to local-only completions.
+			return mapCompletions(this.localSymbols);
 		}
-		if (!imports) {
-			imports = this.imports.values();
-		}
-		const params = this.resolveImports(imports, false);
-		params.base = `${settings.path}/${relPath}`;
-		params.signature = `${signature.name}#${signature.arity}`;
-		return params;
-	}
-
-	getCompletions(prefix: string | null, relPath: string, settings: ServerSettings): Promise<CompletionItem[] | ResponseError<any>> {
-		const params = this.resolveImports(this.imports.values(), false);
-		params.base = `${settings.path}/${relPath}`;
-		if (prefix) {
-			params.prefix = prefix;
-		}
-		const options = this.getOptions(params, settings);
-		return axios.get(options.uri, {
-			auth: {
-				username: settings.user,
-				password: settings.password
-			},
-			params: options.qs,
-			responseType: 'text'
-		}).then(response => {
-			if (response.status !== 200) {
-				this.status(false, settings);
-				throw new Error(`Unexpected status code: ${response.status}`);
-			}
-			this.status(true, settings);
-			const json = JSON.parse(response.data);
-			const symbols: any[] = [];
-			json.forEach((item: { text: string; snippet: string; type: string; name: string; description: string; }) => {
-				const symbol: Symbol = {
-					signature: item.text,
-					type: item.type,
-					snippet: item.snippet.replace(/\:\$/g, ':\\\$'),
-					name: item.name,
-					documentation: item.description
-				};
-				symbols.push(symbol);
-				this.symbolsMap.set(symbol.name, symbol);
-			});
-			return this.mapCompletions(this.localSymbols).concat(this.mapCompletions(symbols));
-		}).catch(error => {
+		const ctx: CompletionContext = {
+			text,
+			prefix,
+			imports: this.imports,
+			relPath,
+			settings
+		};
+		try {
+			const remote = await this.service.completions(ctx);
+			// Track remote-returned symbols in symbolsMap so subsequent
+			// hover/definition lookups can hit them locally without
+			// re-roundtripping.
+			remote.forEach(s => this.symbolsMap.set(s.name, s));
+			return mapCompletions(this.localSymbols).concat(mapCompletions(remote));
+		} catch (e) {
 			this.status(false, settings);
-			return new ResponseError(ErrorCodes.InvalidRequest, error);
-		});
+			return mapCompletions(this.localSymbols);
+		}
 	}
 
 	getDocumentSymbols(textDocument: TextDocument): SymbolInformation[] {
-		return this.mapDocumentSymbols(this.localSymbols, textDocument);
+		return mapDocumentSymbols(this.localSymbols, textDocument, this.uri,
+			(offsets) => this.computeLocation(textDocument, offsets));
 	}
 
-	executeQuery(query: string, settings: ServerSettings, relPath: string): Promise<any> {
-		const params = {
-			output: this.getOutputMode(query),
-			qu: query,
-			count: '100',
-			base: `${settings.path}/${relPath}`
-		};
-		this.logger(`Execute query with output mode: ${params.output}, path: ${params.base}`);
-		return axios.post(`${settings.uri}/apps/atom-editor/execute`, new URLSearchParams(params).toString(), {
-			auth: {
-				username: settings.user,
-				password: settings.password
-			},
-			headers: {
-				'Content-Type': 'application/x-www-form-urlencoded'
-			},
-			responseType: 'text'
-		}).then(response => {
-			const resultCount = response.headers['x-result-count'];
-			const queryTime = response.headers['x-elapsed'];
-			const queryResponse = {
-				output: params.output,
-				hits: resultCount,
-				elapsed: queryTime,
-				results: response.data
-			};
-			return queryResponse;
-		}).catch(error => {
-			throw error;
-		});
-	}
-
-	private getOutputMode(content: string) {
-		const match = /declare\s+option.*:method\s+"(.*)"\s*;/.exec(content);
-		if (match) {
-			return match[1];
-		}
-		return 'adaptive';
-	}
-
-	private getOptions(params: any, settings: ServerSettings, target: string = 'atom-autocomplete.xql') {
-		return {
-			uri: `${settings.uri}/apps/atom-editor/${target}`,
-			qs: params
-		};
-	}
-
-	private mapCompletions(symbols: any[]): CompletionItem[] {
-		return symbols.map(symbol => {
-			const completion: CompletionItem = {
-				label: symbol.signature,
-				kind: symbol.type === 'function' ? CompletionItemKind.Function : CompletionItemKind.Variable,
-				data: symbol.name,
-				insertText: symbol.snippet,
-				insertTextFormat: InsertTextFormat.Snippet
-			};
-			if (symbol.documentation) {
-				completion.detail = symbol.name;
-				completion.documentation = symbol.documentation;
+	getSignatureFromPosition(position: Position): ParsedSignature | undefined {
+		if (!this.ast) return undefined;
+		const node = AST.findNode(this.ast, position);
+		if (node) {
+			const fcall = AST.getAncestorOrSelf('FunctionCall', node);
+			if (fcall) {
+				return AST.getFunctionSignature(fcall);
 			}
-			return completion;
-		});
+		}
+		return undefined;
 	}
 
-	private mapDocumentSymbols(symbols: any[], textDocument: TextDocument): SymbolInformation[] {
-		return symbols.map(symbol => {
-			return {
-				name: symbol.signature,
-				kind: symbol.type === 'function' ? CompletionItemKind.Function : CompletionItemKind.Variable,
-				location: {
-					uri: this.uri,
-					range: this.computeLocation(textDocument, symbol.location)
-				}
-			};
-		});
+	private buildLookupContext(textDocument: TextDocument, position: Position, signature: ParsedSignature | undefined,
+		relPath: string, settings: ServerSettings): LookupContext {
+		return {
+			textDocument,
+			position,
+			signature: signature || null,
+			imports: this.imports,
+			relPath,
+			settings,
+			uri: this.uri
+		};
 	}
 
 	private computeLocation(textDocument: TextDocument, offsets: { start: number; end: number; }): Range {
@@ -378,7 +178,10 @@ export class AnalyzedDocument {
 		};
 	}
 
+	// --- local symbol parsing (unchanged from master) ---
+
 	private static getLocalSymbols(text: string, lineCount: boolean, map: Map<string, Symbol> = new Map()): Map<string, Symbol> {
+		funcDefRe.lastIndex = 0;
 		let funcDef = funcDefRe.exec(text);
 		while (funcDef) {
 			if (funcDef[2]) {
@@ -396,19 +199,12 @@ export class AnalyzedDocument {
 				}
 				const arity = args.length;
 				const signature = name + "(" + args + ")";
-				// const status = funcDef[2].indexOf("%private") == -1 ? "private" : 'public';
 				let location;
 				if (lineCount) {
 					const line = AnalyzedDocument.getLine(text, offset);
-					location = {
-						start: line,
-						end: line
-					};
+					location = { start: line, end: line };
 				} else {
-					location = {
-						start: offset,
-						end: end
-					};
+					location = { start: offset, end: end };
 				}
 				const symbol: Symbol = {
 					signature: signature,
@@ -417,56 +213,12 @@ export class AnalyzedDocument {
 					snippet: AnalyzedDocument.getSnippet(name, args),
 					location: location
 				};
-				if (documentation) {
-					symbol.documentation = documentation;
-				}
+				if (documentation) symbol.documentation = documentation;
 				map.set(symbol.name, symbol);
 			}
 			funcDef = funcDefRe.exec(text);
 		}
 		return map;
-	}
-
-	private static getLocalSymbol(text: string, name: string, arity: number): Symbol | null {
-		const re = new RegExp(`(?:\\(:~(.*?):\\))?\\s*declare\\s+((?:%[\\w\\:\\-]+(?:\\([^\\)]*\\))?\\s*)*function\\s+${name}\\()`, 'gsm');
-		let funcDef = funcDefRe.exec(text);
-		while (funcDef) {
-			if (funcDef[2]) {
-				const offset = funcDefRe.lastIndex;
-				const end = AnalyzedDocument.findMatchingParen(text, offset);
-
-				const documentation = funcDef[1];
-				const fname = funcDef[3].replace(trimRe, "");
-				const argsStr = text.substring(offset, end);
-				let args: string[] = [];
-				if (argsStr.indexOf(',') > -1) {
-					args = argsStr.split(/\s*,\s*/);
-				} else if (argsStr !== '') {
-					args = [argsStr];
-				}
-				const arity = args.length;
-				if (args.length === arity && fname === name) {
-					const line = AnalyzedDocument.getLine(text, offset);
-					const location = {
-						start: line,
-						end: line
-					};
-					const symbol: Symbol = {
-						signature: name + "(" + args + ")",
-						type: 'function',
-						name: `${name}#${arity}`,
-						snippet: AnalyzedDocument.getSnippet(name, args),
-						location: location
-					};
-					if (documentation) {
-						symbol.documentation = documentation;
-					}
-					return symbol;
-				}
-			}
-			funcDef = funcDefRe.exec(text);
-		}
-		return null;
 	}
 
 	private static findMatchingParen(text: string, offset: number) {
@@ -475,9 +227,7 @@ export class AnalyzedDocument {
 			let ch = text.charAt(i);
 			if (ch === ')') {
 				depth -= 1;
-				if (depth === 0) {
-					return i;
-				}
+				if (depth === 0) return i;
 			} else if (ch === '(') {
 				depth += 1;
 			}
@@ -499,67 +249,39 @@ export class AnalyzedDocument {
 	private static getLine(text: string, offset: number) {
 		let newlines = 0;
 		for (let i = 0; i < offset; i++) {
-			if (text.charAt(i) === '\n') {
-				++newlines;
-			}
+			if (text.charAt(i) === '\n') ++newlines;
 		}
 		return newlines;
 	}
+}
 
-	private parseImports(text: string) {
-		this.imports.clear();
-		let match = importRe.exec(text);
+// ---- Symbol → LSP CompletionItem / SymbolInformation mapping ----
 
-		while (match != null) {
-			if (match[1]) {
-				const imp = match[1];
-				match = moduleRe.exec(imp);
-				if (match && match.length === 4) {
-					const isJava = match[3].substring(0, 5) == "java:";
-					const importData = {
-						prefix: match[1],
-						uri: match[2],
-						source: match[3],
-						isJava: isJava
-					};
-					this.imports.set(importData.prefix, importData);
-				}
-			}
-			match = importRe.exec(text);
-		}
-	}
-
-	private resolveImports(imports: IterableIterator<Import>, includeJava = true): {
-		mprefix: string[], uri: string[], source: string[], base: string, prefix?: string,
-		signature?: string
-	} {
-		const prefixes: string[] = [];
-		const uris: string[] = [];
-		const sources: string[] = [];
-		for (let imp of imports) {
-			if (!imp.isJava || includeJava) {
-				prefixes.push(imp.prefix);
-				uris.push(imp.uri);
-				if (imp.source) {
-					sources.push(imp.source);
-				}
-			}
-		}
-		return {
-			mprefix: prefixes,
-			uri: uris,
-			source: sources,
-			base: ''
+function mapCompletions(symbols: Symbol[]): CompletionItem[] {
+	return symbols.map(symbol => {
+		const completion: CompletionItem = {
+			label: symbol.signature,
+			kind: symbol.type === 'function' ? CompletionItemKind.Function : CompletionItemKind.Variable,
+			data: symbol.name,
+			insertText: symbol.snippet,
+			insertTextFormat: InsertTextFormat.Snippet
 		};
-	}
-
-	private getSignatureFromPosition(position: Position): any | undefined {
-		const node = AST.findNode(this.ast, position);
-		if (node) {
-			const fcall = AST.getAncestorOrSelf('FunctionCall', node);
-			if (fcall) {
-				return AST.getFunctionSignature(fcall);
-			}
+		if (symbol.documentation) {
+			completion.detail = symbol.name;
+			completion.documentation = symbol.documentation;
 		}
-	}
+		return completion;
+	});
+}
+
+function mapDocumentSymbols(symbols: Symbol[], textDocument: TextDocument, uri: string,
+	computeRange: (offsets: { start: number; end: number; }) => Range): SymbolInformation[] {
+	return symbols.map(symbol => ({
+		name: symbol.signature,
+		kind: symbol.type === 'function' ? CompletionItemKind.Function : CompletionItemKind.Variable,
+		location: {
+			uri,
+			range: symbol.location ? computeRange(symbol.location) : Range.create(0, 0, 0, 0)
+		}
+	}));
 }
