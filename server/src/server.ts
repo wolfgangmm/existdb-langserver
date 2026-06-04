@@ -8,7 +8,7 @@ import {
 	DidChangeConfigurationNotification, TextDocumentPositionParams, CompletionItem,
 	WorkspaceFolder, ResponseError, DocumentSymbolParams,
 	SymbolInformation, Hover,
-	Location, ConfigurationItem
+	Location, ConfigurationItem, ReferenceParams
 } from 'vscode-languageserver/node';
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from 'vscode-uri';
@@ -168,7 +168,13 @@ connection.onInitialize((params) => {
 			},
 			documentSymbolProvider: true,
 			definitionProvider: true,
-			hoverProvider: true
+			hoverProvider: true,
+			// v7-only features. The handlers below check the active service's
+			// optional methods; when the server is v6 (atom-editor) and the
+			// optional method is undefined, the handlers return [] / null —
+			// VSCode then either doesn't show the affordance (e.g., no "Find
+			// References" menu population) or treats it as "no result".
+			referencesProvider: true
 		}
 	};
 });
@@ -408,14 +414,55 @@ connection.onCompletionResolve((item: CompletionItem): CompletionItem => {
 	return item;
 });
 
-connection.onDocumentSymbol((params: DocumentSymbolParams): SymbolInformation[] => {
+connection.onDocumentSymbol(async (params: DocumentSymbolParams): Promise<SymbolInformation[]> => {
 	const uri = params.textDocument.uri;
 	const textDocument = documents.get(uri);
 	if (!textDocument) {
 		return [];
 	}
 	const document = getAnalyzedDocument(textDocument);
+	// v7-only: ask the server for a richer symbols list (return types,
+	// parameter types). If the active service doesn't implement it, fall
+	// back to the local AST.
+	const svc = serverCapabilities?.languageService;
+	if (svc?.documentSymbols) {
+		const settings = await getSettings();
+		const relPath = getRelativePath(uri);
+		try {
+			const remote = await svc.documentSymbols(textDocument.getText(), relPath, settings);
+			if (remote.length > 0) {
+				return remote.map(s => ({ ...s, location: { ...s.location, uri } }));
+			}
+		} catch (e) {
+			// fall through to local
+		}
+	}
 	return document.getDocumentSymbols(textDocument);
+});
+
+connection.onReferences(async (params: ReferenceParams): Promise<Location[]> => {
+	const uri = params.textDocument.uri;
+	const textDocument = documents.get(uri);
+	if (!textDocument) return [];
+	const svc = serverCapabilities?.languageService;
+	if (!svc?.references) return [];
+	const document = getAnalyzedDocument(textDocument);
+	const settings = await getSettings();
+	const relPath = getRelativePath(uri);
+	const signature = document.getSignatureFromPosition(params.position);
+	try {
+		return await svc.references({
+			textDocument,
+			position: params.position,
+			signature: signature || null,
+			imports: document.imports,
+			relPath,
+			settings,
+			uri
+		});
+	} catch (e) {
+		return [];
+	}
 });
 
 connection.onHover((params: TextDocumentPositionParams): Promise<Hover | null> => {
